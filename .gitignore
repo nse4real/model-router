@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.py[cod]
+.venv/
+.tooling/
+results/
+.coverage
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+Project_13_Model_Routing_System.pdf
