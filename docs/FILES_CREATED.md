@@ -1,0 +1,81 @@
+# Implementation file inventory
+
+73 implementation/support files present, including this inventory.
+PLAN.md, the source PDF and the existing root licence are excluded.
+The .gitignore was prepared during the build and is present in the observed
+tracked baseline; no staging or commit was performed by this agent.
+Generated results and tooling caches are ignored and excluded below.
+
+- .dockerignore
+- .env.example
+- .gitignore
+- Dockerfile
+- Makefile
+- README.md
+- api/__init__.py
+- api/app.py
+- api/contracts.py
+- benchmark/__init__.py
+- benchmark/data/GSM8K_LICENSE.txt
+- benchmark/data/manifest.json
+- benchmark/data/prompts.jsonl
+- benchmark/dataset.py
+- benchmark/diagnostics.py
+- benchmark/evaluate.py
+- benchmark/judge.py
+- benchmark/load_test.py
+- benchmark/preflight.py
+- benchmark/ratings.py
+- benchmark/recover.py
+- benchmark/reproduce.py
+- benchmark/results.py
+- benchmark/run.py
+- benchmark/statistics.py
+- cache/__init__.py
+- cache/exact.py
+- classifier/__init__.py
+- classifier/scorer.py
+- config/__init__.py
+- config/models.json
+- docker-compose.yml
+- docs/BENCHMARK.md
+- docs/COMMAND_LOG.json
+- docs/DATASET.md
+- docs/DECISIONS.md
+- docs/FILES_CREATED.md
+- docs/TEST_MATRIX.md
+- docs/VERIFICATION.md
+- docs/dashboard.md
+- fallback/__init__.py
+- fallback/providers.py
+- monitoring/__init__.py
+- monitoring/calibration_status.json
+- monitoring/grafana/dashboards/router.json
+- monitoring/grafana/provisioning/dashboards/router.yml
+- monitoring/grafana/provisioning/datasources/prometheus.yml
+- monitoring/judge_prompt_v1.md
+- monitoring/ledger.py
+- monitoring/metrics.py
+- monitoring/prometheus.yml
+- monitoring/quality.py
+- monitoring/schema.sql
+- monitoring/security.py
+- pyproject.toml
+- routing/__init__.py
+- routing/config.py
+- routing/latency.py
+- routing/policy.py
+- routing/service.py
+- scripts/__init__.py
+- scripts/lint.py
+- scripts/manage.py
+- scripts/seed_mock.py
+- tests/__init__.py
+- tests/test_api.py
+- tests/test_regressions.py
+- tests/test_services.py
+- tests/test_stage1.py
+- tests/test_stage2.py
+- tests/test_stage3.py
+- tests/test_stage4.py
+- tests/test_tooling.py

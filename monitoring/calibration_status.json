@@ -1,0 +1,7 @@
+{
+  "validated": false,
+  "status": "pending_human_ratings",
+  "human_ratings_collected": 0,
+  "quality_routing_enabled": false,
+  "reason": "No real outputs or human calibration scores collected; synthetic tests do not validate a judge."
+}

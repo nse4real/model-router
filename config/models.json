@@ -1,0 +1,61 @@
+{
+  "price_version": "mock-2026-10-16-v1",
+  "global_cap_usd": "25",
+  "evaluation_cap_usd": "3",
+  "thresholds": [
+    2,
+    5
+  ],
+  "slo_ms": 2000,
+  "models": {
+    "cheap": {
+      "id": "anthropic/claude-3-haiku-20240307",
+      "provider": "anthropic",
+      "input_per_million": "0.25",
+      "output_per_million": "1.25",
+      "rpm": 300
+    },
+    "mid": {
+      "id": "openai/gpt-4.1-mini",
+      "provider": "openai",
+      "input_per_million": "0.40",
+      "output_per_million": "1.60",
+      "rpm": 300
+    },
+    "frontier": {
+      "id": "openai/gpt-4o",
+      "provider": "openai",
+      "input_per_million": "2.5",
+      "output_per_million": "10",
+      "rpm": 300
+    },
+    "local": {
+      "id": "ollama/llama3.2",
+      "provider": "ollama",
+      "input_per_million": "0",
+      "output_per_million": "0",
+      "rpm": 300,
+      "litellm": {
+        "api_base": "http://localhost:11434"
+      }
+    }
+  },
+  "chains": {
+    "simple": [
+      "cheap",
+      "mid",
+      "frontier"
+    ],
+    "medium": [
+      "mid",
+      "frontier",
+      "cheap"
+    ],
+    "complex": [
+      "frontier",
+      "mid",
+      "cheap"
+    ]
+  },
+  "judge": "mid"
+}
