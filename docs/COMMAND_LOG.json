@@ -1,0 +1,202 @@
+[
+  {
+    "sequence": 1,
+    "command": "python scripts/manage.py test",
+    "exit_code": 0,
+    "tests": [
+      "Ran 8 tests in 0.018s",
+      "OK"
+    ]
+  },
+  {
+    "sequence": 2,
+    "command": "python -m pip install --target .tooling/deps --retries 0 --timeout 5 fastapi httpx ruff",
+    "exit_code": 1
+  },
+  {
+    "sequence": 3,
+    "command": "python scripts/manage.py test",
+    "exit_code": 0,
+    "tests": [
+      "Ran 25 tests in 0.329s",
+      "OK (skipped=1)"
+    ]
+  },
+  {
+    "sequence": 4,
+    "command": "python scripts/manage.py test",
+    "exit_code": 0,
+    "tests": [
+      "Ran 41 tests in 0.679s",
+      "OK (skipped=1)"
+    ]
+  },
+  {
+    "sequence": 5,
+    "command": "python scripts/manage.py test",
+    "exit_code": 0,
+    "tests": [
+      "Ran 51 tests in 0.951s",
+      "OK (skipped=1)"
+    ]
+  },
+  {
+    "sequence": 6,
+    "command": "python scripts/manage.py test",
+    "exit_code": 1,
+    "tests": [
+      "Ran 51 tests in 0.745s",
+      "FAILED (failures=1, errors=18, skipped=1)"
+    ]
+  },
+  {
+    "sequence": 7,
+    "command": "python scripts/manage.py test",
+    "exit_code": 0,
+    "tests": [
+      "Ran 51 tests in 0.816s",
+      "OK (skipped=1)"
+    ]
+  },
+  {
+    "sequence": 8,
+    "command": "python scripts/manage.py test",
+    "exit_code": 0,
+    "tests": [
+      "Ran 57 tests in 0.949s",
+      "OK (skipped=3)"
+    ]
+  },
+  {
+    "sequence": 9,
+    "command": "python scripts/manage.py lint",
+    "exit_code": 0,
+    "result": "Syntax/hygiene lint passed: 39 Python files"
+  },
+  {
+    "sequence": 10,
+    "command": "python -m benchmark.load_test --transport in-process --n 100 --concurrency 10 --duration 1 --output results/load-test-mock-core.json",
+    "exit_code": 0
+  },
+  {
+    "sequence": 11,
+    "command": "python -m benchmark.run --split dev --storage test-double --output results/benchmark-mock-dev.json",
+    "exit_code": 1
+  },
+  {
+    "sequence": 12,
+    "command": "python scripts/manage.py test",
+    "exit_code": 0,
+    "tests": [
+      "Ran 57 tests in 0.935s",
+      "OK (skipped=3)"
+    ]
+  },
+  {
+    "sequence": 13,
+    "command": "python -m benchmark.run --split dev --storage test-double --output results/benchmark-mock-dev-verified.json",
+    "exit_code": 0
+  },
+  {
+    "sequence": 14,
+    "command": "python scripts/manage.py test",
+    "exit_code": 0,
+    "tests": [
+      "Ran 59 tests in 1.045s",
+      "OK (skipped=3)"
+    ]
+  },
+  {
+    "sequence": 15,
+    "command": "python scripts/manage.py lint",
+    "exit_code": 0,
+    "result": "Syntax/hygiene lint passed: 39 Python files"
+  },
+  {
+    "sequence": 16,
+    "command": "python scripts/manage.py test",
+    "exit_code": 1,
+    "tests": [
+      "Ran 61 tests in 0.949s",
+      "FAILED (failures=1, skipped=3)"
+    ]
+  },
+  {
+    "sequence": 17,
+    "command": "python scripts/manage.py test",
+    "exit_code": 0,
+    "tests": [
+      "Ran 61 tests in 1.078s",
+      "OK (skipped=3)"
+    ]
+  },
+  {
+    "sequence": 18,
+    "command": "python scripts/manage.py lint",
+    "exit_code": 0,
+    "result": "Syntax/hygiene lint passed: 41 Python files"
+  },
+  {
+    "sequence": 19,
+    "command": "python -m benchmark.diagnostics",
+    "exit_code": 0
+  },
+  {
+    "sequence": 20,
+    "command": "python scripts/manage.py test",
+    "exit_code": 0,
+    "tests": [
+      "Ran 64 tests in 1.785s",
+      "OK (skipped=3)"
+    ]
+  },
+  {
+    "sequence": 21,
+    "command": "python scripts/manage.py test",
+    "exit_code": 0,
+    "tests": [
+      "Ran 64 tests in 1.573s",
+      "OK (skipped=3)"
+    ]
+  },
+  {
+    "sequence": 22,
+    "command": "docker compose config --quiet",
+    "exit_code": 125
+  },
+  {
+    "sequence": 23,
+    "command": "python scripts/manage.py lint",
+    "exit_code": 0,
+    "result": "Syntax/hygiene lint passed: 46 Python files"
+  },
+  {
+    "sequence": 24,
+    "command": "python -m benchmark.load_test --transport in-process --n 100 --concurrency 10 --duration 1 --output results/final-load-mock-core.json",
+    "exit_code": 0
+  },
+  {
+    "sequence": 25,
+    "command": "python scripts/manage.py test",
+    "exit_code": 0,
+    "tests": [
+      "Ran 64 tests in 1.533s",
+      "OK (skipped=3)"
+    ]
+  },
+  {
+    "sequence": 26,
+    "command": "python -m benchmark.run --split dev --storage test-double --output results/final-dev-mock.json",
+    "exit_code": 0
+  },
+  {
+    "sequence": 27,
+    "command": "python -m benchmark.judge results/final-dev-mock.json",
+    "exit_code": 0
+  },
+  {
+    "sequence": 28,
+    "command": "docker compose version",
+    "exit_code": 1
+  }
+]

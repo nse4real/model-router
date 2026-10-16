@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "model-router"
+version = "0.1.0"
+description = "Mock-first model router with durable spend admission"
+requires-python = ">=3.11"
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "psycopg[binary]>=3.2,<4", "redis>=5,<7", "prometheus-client>=0.21,<1"]
+
+[project.optional-dependencies]
+real = ["litellm>=1.60,<2"]
+dev = ["ruff>=0.9,<1", "httpx>=0.28,<1"]
+
+[tool.setuptools.packages.find]
+include = ["api*", "classifier*", "routing*", "cache*", "fallback*", "monitoring*", "benchmark*", "scripts*", "config*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.setuptools.package-data]
+config = ["*.json"]
+monitoring = ["*.sql", "*.md", "*.json", "*.yml", "grafana/**/*.json", "grafana/**/*.yml"]
+benchmark = ["data/*.json", "data/*.jsonl", "data/*.txt"]
