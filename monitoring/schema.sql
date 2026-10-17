@@ -9,10 +9,10 @@ CREATE TABLE IF NOT EXISTS requests (
 );
 CREATE TABLE IF NOT EXISTS attempts (
  attempt_id TEXT PRIMARY KEY, parent_request_id TEXT NOT NULL REFERENCES requests(request_id),
- model TEXT NOT NULL, provider TEXT NOT NULL, purpose TEXT NOT NULL,
+ model TEXT NOT NULL, resolved_model TEXT, provider TEXT NOT NULL, purpose TEXT NOT NULL,
  input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0, price_version TEXT NOT NULL,
  reserved NUMERIC NOT NULL, cost NUMERIC NOT NULL, state TEXT NOT NULL,
- cost_status TEXT NOT NULL, error TEXT, created_at NUMERIC NOT NULL,
+ cost_status TEXT NOT NULL, error TEXT, latency_ms NUMERIC, created_at NUMERIC NOT NULL,
  CHECK (state IN ('reserved','dispatched','settled','unknown')),
  CHECK (purpose IN ('inference','evaluation'))
 );
@@ -22,3 +22,11 @@ CREATE TABLE IF NOT EXISTS judge_jobs (
 );
 CREATE INDEX IF NOT EXISTS attempts_parent ON attempts(parent_request_id);
 CREATE INDEX IF NOT EXISTS requests_run ON requests(run_id);
+
+CREATE TABLE IF NOT EXISTS benchmark_runs (
+ run_id TEXT PRIMARY KEY, metadata TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS benchmark_records (
+ request_id TEXT PRIMARY KEY REFERENCES requests(request_id),
+ run_id TEXT NOT NULL REFERENCES benchmark_runs(run_id), record TEXT NOT NULL
+);

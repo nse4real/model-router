@@ -5,14 +5,43 @@ import json
 import logging
 from pathlib import Path
 import random
+import time
 from statistics import mean
 from uuid import uuid4
 from api.contracts import Request
 from benchmark.statistics import bootstrap_ci, spearman, correlation_ci
 from monitoring.ledger import StorageUnavailable
 from monitoring.security import redact
+from monitoring.settlement import SettlementJournal, settle_response
+from routing.admission import Admission
+from routing.latency import Health
 
 LOG = logging.getLogger("router.quality")
+
+
+def job_reason(detail):
+    """Retain exception classes even when timeout/cancellation messages are empty."""
+    if isinstance(detail, BaseException):
+        return redact(type(detail).__name__ + (": " + str(detail) if str(detail) else ""))
+    return redact(str(detail).strip() or "Judge job did not complete")
+
+
+def ensure_job_reasons(db):
+    # Companion job metadata keeps recovery from changing other runs' rows or
+    # their schema. The caller holds the spend lock for portable initialization.
+    db.execute("CREATE TABLE IF NOT EXISTS judge_job_reasons ("
+               "attempt_id TEXT PRIMARY KEY REFERENCES judge_jobs(attempt_id), reason TEXT NOT NULL)")
+
+
+async def _cancel_and_drain(task):
+    if not task.done():
+        task.cancel()
+    drained = asyncio.gather(task, return_exceptions=True)
+    while not drained.done():
+        try:
+            await asyncio.shield(drained)
+        except asyncio.CancelledError:
+            continue
 
 
 def validate_calibration(pairs, seed=13, resamples=10000):
@@ -55,8 +84,11 @@ def validate_calibration(pairs, seed=13, resamples=10000):
 
 class Quality:
     def __init__(self, ledger, config, provider, validated=False, enabled=False,
-                 benchmark=False, queue_size=100, sample_rate=.1, seed=13, timeout=5):
+                 benchmark=False, queue_size=100, sample_rate=.1, seed=13, timeout=5, health=None, rate=None, clock=time.monotonic,
+                 rubric=None):
         self.ledger, self.config, self.provider = ledger, config, provider
+        self.admission = Admission(health or Health(slo_ms=config.slo_ms), rate)
+        self.clock = clock
         self.validated, self.enabled, self.benchmark = validated, enabled, benchmark
         self.queue = asyncio.Queue(maxsize=queue_size)
         self.rng = random.Random(seed)
@@ -64,6 +96,8 @@ class Quality:
         self.windows = defaultdict(lambda: deque(maxlen=30))
         self.alerts = set()
         self.recovery = defaultdict(list)
+        self.failure_reasons = {}
+        self.rubric = rubric
 
     def raised(self, route):
         return self.enabled and self.validated and not self.benchmark and route in self.alerts
@@ -84,9 +118,16 @@ class Quality:
                 self.recovery[route].clear()
 
     def unknown(self, job, detail):
-        LOG.warning("quality_unknown %s", redact({"attempt_id": job[0], "reason": str(detail)}))
+        reason = job_reason(detail)
+        self.failure_reasons[job[0]] = reason
+        LOG.warning("quality_unknown %s", {"attempt_id": job[0], "reason": reason})
         try:
             self.ledger.job(job[0], job[1], "quality_unknown")
+            with self.ledger.transaction(lock=True) as db:
+                ensure_job_reasons(db)
+                db.execute("INSERT INTO judge_job_reasons(attempt_id,reason) "
+                           "SELECT attempt_id,? FROM judge_jobs WHERE attempt_id=? AND state='quality_unknown' "
+                           "ON CONFLICT(attempt_id) DO UPDATE SET reason=excluded.reason", (reason, job[0]))
         except StorageUnavailable:
             LOG.warning("quality_unknown storage_unavailable")
 
@@ -101,33 +142,80 @@ class Quality:
             self.unknown(job, exc)
         return job[0]
 
+    async def async_submit(self, parent, route, request, output):
+        # Database persistence is off the response path, while asyncio queue
+        # mutations remain on their owning event loop.
+        if self.rng.random() >= self.sample_rate:
+            return None
+        job = (str(uuid4()), parent, route, request, output)
+        try:
+            await asyncio.to_thread(self.ledger.job, job[0], parent)
+            self.queue.put_nowait(job)
+        except (asyncio.QueueFull, StorageUnavailable) as exc:
+            await asyncio.to_thread(self.unknown, job, exc)
+        return job[0]
+
     async def process(self, job):
         attempt, parent, route, request, output = job
         alias = self.config.data["judge"]
         model = self.config.model(alias)
+        permit = None
+        observed = False
+        call_start = None
+        call = None
         try:
-            if not self.ledger.claim_job(attempt):
-                return
-            rubric = Path(__file__).with_name("judge_prompt_v1.md").read_text()
+            rubric = self.rubric if self.rubric is not None else Path(__file__).with_name("judge_prompt_v1.md").read_text()
             judge_request = Request.parse(dict(messages=[dict(role="system", content=rubric),
                  dict(role="user", content=json.dumps(dict(messages=list(request.messages),
                                                            answer=output.content)))], max_tokens=32))
             worst = self.config.reserve_cost(alias, judge_request)
-            self.ledger.reserve(attempt, parent, model["id"], model["provider"], "evaluation",
-                                self.config.version, worst)
-            self.ledger.dispatch(attempt)
-            result = await asyncio.wait_for(self.provider.complete(model, judge_request, self.timeout),
-                                            timeout=self.timeout)
+            permit = self.admission.acquire(model)
+            if permit is None:
+                raise ValueError("Judge model unavailable: rate or cooldown")
+            if not self.ledger.retry_admission(self.ledger.claim_and_reserve, attempt, parent,
+                                                 model["id"], model["provider"], self.config.version, worst):
+                return
+            self.ledger.retry_admission(self.ledger.dispatch, attempt)
+            call_start = self.clock()
+            async def provider_call():
+                # Health's probe wrapper can also be cancelled before it starts
+                # awaiting its argument. Pass an owned Task, never a bare coroutine.
+                provider_task = asyncio.create_task(self.provider.complete(model, judge_request, self.timeout))
+                try:
+                    return await self.admission.health.run_probe(model["id"], permit,
+                        provider_task, clock=self.clock)
+                finally:
+                    await _cancel_and_drain(provider_task)
+
+            call = asyncio.create_task(provider_call())
+            result = await asyncio.wait_for(call, timeout=self.timeout)
+            accepted = self.admission.health.observe(model["id"], permit, True,
+                                                       (self.clock() - call_start) * 1000)
+            observed = True
             actual = self.config.cost(alias, result.input_tokens, result.output_tokens)
-            self.ledger.settle(attempt, actual, result.input_tokens, result.output_tokens)
+            status, _ = await settle_response(self.ledger, SettlementJournal(), attempt, result, actual, worst)
+            if status == "unknown":
+                raise ValueError("Judge settlement unknown")
+            if not accepted:
+                raise ValueError("Judge probe lease lost")
             parsed = json.loads(result.content)
             value = parsed["score"]
             if type(value) is not int or not 1 <= value <= 5:
                 raise ValueError("Malformed judge score")
             if self.ledger.job(attempt, parent, "completed", value):
                 self.observe(route, value)
-        except Exception as exc:
+        except (Exception, asyncio.CancelledError) as exc:
+            if call_start is not None and not observed:
+                self.admission.health.observe(model["id"], permit, False,
+                                              (self.clock() - call_start) * 1000)
             self.unknown(job, exc)
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+        finally:
+            if call is not None:
+                await _cancel_and_drain(call)
+            if permit is not None:
+                self.admission.health.release(model["id"], permit)
 
     async def drain(self):
         while not self.queue.empty():

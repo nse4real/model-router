@@ -4,6 +4,7 @@ import re
 SENSITIVE = {"authorization", "api_key", "apikey", "x-api-key", "openai_api_key",
              "anthropic_api_key", "password", "token", "access_token"}
 PATTERNS = [
+    (re.compile(r"(?im)(authorization[\"']?\s*[:=]\s*)[^\r\n]*"), r"\1[REDACTED]"),
     (re.compile(r"(?i)bearer\s+[^\s,;\"'}]+"), "Bearer [REDACTED]"),
     (re.compile(r"sk-[A-Za-z0-9_-]+"), "[REDACTED]"),
     (re.compile(r"(?i)((?:api[_-]?key|authorization|password)[\"']?\s*[:=]\s*[\"']?)[^\s,;\"'}]+"),

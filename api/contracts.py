@@ -19,7 +19,7 @@ class Request:
     max_tokens: int = 512
     max_cost_usd: Decimal | None = None
     deadline_ms: int = 10000
-    temperature: float = 0
+    temperature: float = 1
     request_id: str = field(default_factory=lambda: str(uuid4()))
 
     @classmethod
@@ -46,7 +46,7 @@ class Request:
                 raise RouterError(400, "Invalid message")
         max_tokens = data.get("max_tokens", 512)
         deadline = data.get("deadline_ms", 10000)
-        temperature = data.get("temperature", 0)
+        temperature = data.get("temperature", 1)
         if type(max_tokens) is not int or not 1 <= max_tokens <= 2048:
             raise RouterError(400, "max_tokens must be 1..2048")
         if type(deadline) is not int or not 1 <= deadline <= 60000:

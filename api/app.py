@@ -9,20 +9,27 @@ from api.contracts import RouterError
 from routing.service import Router
 from monitoring.ledger import PostgresLedger, SQLiteLedger
 from cache.exact import RedisCache, RedisRate
-from fallback.providers import MockJudgeProvider
+from fallback.providers import MockJudgeProvider, MockProvider, real_provider
 from monitoring.quality import Quality, validate_calibration
 from routing.config import Config
 from routing.latency import Health, RedisHealthStore
 
 
-def build_router():
+def build_router(real=False):
     mode = os.environ.get("PROVIDER_MODE", "mock")
-    if mode != "mock":
-        raise RuntimeError("This entry point permits mock providers only")
+    if mode not in ("mock", "real"):
+        raise ValueError("Unknown PROVIDER_MODE")
+    if mode == "real" and not real:
+        raise ValueError("Real mode requires the --real entry point flag")
+    provider = real_provider(real) if real else MockProvider()
+    config = Config(os.environ.get("ROUTER_CONFIG"))
     if os.environ.get("STORAGE_MODE") == "test-double":
-        return Router(SQLiteLedger())
+        if real:
+            raise ValueError("Real entry points require shared Postgres spend admission")
+        return Router(SQLiteLedger(cap=config.data["global_cap_usd"],
+                                   evaluation_cap=config.data["evaluation_cap_usd"]),
+                      config=config, provider=provider)
     import redis
-    config = Config()
     ledger = PostgresLedger(os.environ.get("DATABASE_URL",
                             "postgresql://router:router@localhost:5432/router"),
                             cap=config.data["global_cap_usd"],
@@ -35,10 +42,10 @@ def build_router():
         from pathlib import Path
         ratings = json.loads(Path(ratings_path).read_text())
         validated = validate_calibration(ratings)["validated"]
-    quality = Quality(ledger, config, MockJudgeProvider(), validated=validated,
+    quality = Quality(ledger, config, provider if real else MockJudgeProvider(), validated=validated,
                       enabled=os.environ.get("QUALITY_ROUTING") == "true")
-    return Router(ledger, config=config, cache=RedisCache(client), rate=RedisRate(client),
-                  health=Health(RedisHealthStore(client), config.data["slo_ms"]), quality=quality)
+    return Router(ledger, config=config, provider=provider, cache=RedisCache(client), rate=RedisRate(client),
+                  health=Health(RedisHealthStore(client), config.slo_ms), quality=quality)
 
 
 def create_app(router=None):
@@ -51,6 +58,7 @@ def create_app(router=None):
         async def recovery():
             while True:
                 try:
+                    await asyncio.to_thread(service.settlement_journal.recover, service.ledger)
                     await asyncio.to_thread(service.ledger.recover)
                 except Exception:
                     pass
@@ -58,12 +66,15 @@ def create_app(router=None):
         worker = asyncio.create_task(recovery())
         quality_worker = asyncio.create_task(service.quality.worker()) if service.quality else None
         yield
+        await service.drain_background()
+        if service.quality:
+            await service.quality.queue.join()
         worker.cancel()
         if quality_worker:
             quality_worker.cancel()
         await asyncio.gather(worker, *([quality_worker] if quality_worker else []), return_exceptions=True)
 
-    app = FastAPI(title="Model Router (mock)", lifespan=lifespan)
+    app = FastAPI(title="Model Router", lifespan=lifespan)
     app.state.router = router
 
     @app.exception_handler(RouterError)
@@ -97,14 +108,26 @@ def create_app(router=None):
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "providers": "mock"}
+        return {"status": "ok", "providers": app.state.router.provider.mode}
 
     @app.get("/metrics")
     async def metrics():
         from monitoring.metrics import prometheus
-        return Response(prometheus(app.state.router.ledger, os.environ.get("MATCHED_RESULTS_FILE")), media_type="text/plain; version=0.0.4")
+        return Response(prometheus(app.state.router.ledger, os.environ.get("MATCHED_RESULTS_FILE"),
+                                   data_source=app.state.router.provider.mode), media_type="text/plain; version=0.0.4")
 
     return app
 
 
 app = create_app()
+
+
+if __name__ == "__main__":
+    import argparse
+    import uvicorn
+    parser = argparse.ArgumentParser(description="Start the router; mock providers by default")
+    parser.add_argument("--real", action="store_true")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+    uvicorn.run(create_app(build_router(real=args.real)), host=args.host, port=args.port)
