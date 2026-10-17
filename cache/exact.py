@@ -3,9 +3,10 @@ import json
 import time
 
 
-def key(request, model_id, price_version):
+def key(request, model_id, price_version, provider_parameters=None, provider_version="1"):
     canonical = dict(messages=list(request.messages), model=model_id, price_version=price_version,
-                     max_tokens=request.max_tokens, temperature=request.temperature)
+                     max_tokens=request.max_tokens, temperature=request.temperature,
+                     provider_parameters=provider_parameters or {}, provider_version=provider_version)
     return hashlib.sha256(json.dumps(canonical, sort_keys=True, ensure_ascii=False,
                                      separators=(",", ":")).encode()).hexdigest()
 

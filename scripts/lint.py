@@ -5,7 +5,7 @@ import sys
 import tokenize
 
 ROOT = Path(__file__).resolve().parents[1]
-EXCLUDE = {".git", ".venv", ".tooling", "__pycache__", "results", ".ruff_cache"}
+EXCLUDE = {".git", ".venv", ".venv-real", ".tooling", "__pycache__", "results", ".ruff_cache"}
 
 
 def main():

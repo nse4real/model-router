@@ -6,6 +6,8 @@ services:
       PROVIDER_MODE: mock
       DATABASE_URL: postgresql://router:router@postgres:5432/router
       REDIS_URL: redis://redis:6379/0
+      LEDGER_RESPONSE_STORE: /var/lib/router-responses/settlement-recovery.sqlite
+    volumes: ["router-responses:/var/lib/router-responses"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,3 +48,4 @@ services:
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
 volumes:
   postgres-data:
+  router-responses:
