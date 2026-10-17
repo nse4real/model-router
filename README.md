@@ -1,5 +1,32 @@
 # Model Routing System
 
+## Latency SLO
+
+The live API, benchmark generation and judges use one **20000 ms SLO**, configured
+by `slo_ms`. It measures **full-completion latency**, from provider dispatch to the
+final response, excluding settlement/storage time. Every benchmark generation or
+standalone judge run starts fresh health for all its models; the API keeps health
+across requests. This decision follows 120 of 200 HTTP 503 responses caused by
+cooldown in `results/calibration-real-v3.json`. See [decisions](docs/DECISIONS.md).
+
+## Matched temperature correction (2026-10-17)
+
+Matched generation uses **temperature 1 for all conditions and models** because
+`claude-haiku-5-5` accepts only temperature 1. API and internal request defaults
+also use 1; provider adapters forward the request temperature unchanged, and the
+API still accepts the range 0..2. Outputs are sampled and are **not identical
+across runs**. Reproducibility is distributional, assessed with per-prompt
+bootstrap confidence intervals on the fixed repeat subset, not exact-output
+identity. The benchmark seed fixes ordering and resampling, not provider outputs.
+
+The earlier temperature-0 real calibration run returned 115 Anthropic HTTP 400
+rejections and 98 dependent benchmark-condition HTTP 503 responses. Its output
+files, including `results/calibration-real.json`, are kept unchanged for audit;
+that failed run does not establish matched quality or savings. This change has
+not rerun calibration or held-out evaluation and makes no new real-provider claim.
+The 115 rejected calls remain recorded as dispatched/estimated. Whether to revise
+that accounting is an open decision; ledger accounting is unchanged in this round.
+
 A mock-first FastAPI router implementing all four development milestones in
 PLAN.md, including the v4 recovery rules. It classifies chat requests, chooses a
 configured model within budget and deadline, reserves spend before each call,
@@ -7,9 +34,40 @@ caches exact responses, falls back on failures, and exposes ledger metrics for
 Grafana.
 
 **Status:** mock implementation with offline verification. Real-provider paths are
-unverified. Human calibration and the held-out benchmark have not been run.
+unverified after the failed real calibration above. Human judge calibration and
+the held-out benchmark remain incomplete.
 Savings, real answer quality and real provider latency results are pending a real
 benchmark run. No measured savings or quality result is claimed.
+
+## Configured models and pricing
+
+The cheap model uses the listed provider alias `anthropic/claude-haiku-5-5`
+(Claude Haiku 5.5). Per the supplied provider model-list finding, the dated ID
+`claude-haiku-5-5-20261001` was not listed. Each provider response's model ID is
+recorded as `resolved_model`; the requested alias stays in `model` in the ledger
+and API, and `requested_model` in result records and their attempt lists.
+Result metadata includes `resolved_model_ids` and counts in `model_resolutions`,
+including inference and judge calls. Missing response IDs remain null; cache
+hits retain the originating snapshot without adding an attempt. Prices remain
+user supplied and unverified against provider billing. Mid/frontier remain
+GPT-4.1 mini/GPT-4o with flat mock prices.
+
+| Cheap model input tokens per request | Input USD / million | Output USD / million |
+|---|---|---|
+| Up to and including 100,000 | $0.10 | $0.50 |
+| Above 100,000 | $0.50 | $2.50 |
+
+Input usage selects one tier for all input and output tokens in a request;
+this per-request assumption is pending user confirmation. Reservation uses
+estimated input with the higher rates from 90,000 through 100,000 tokens;
+settlement uses actual provider input usage. The public input cap remains 32 KB.
+Models may use ordered `tiers` ending in an unbounded (null) tier, or flat
+`input_per_million`/`output_per_million` prices. Invalid prices return 422.
+
+The dated `price_version` is `user-supplied-2026-10-17-v2`. Bump it when models,
+prices or tiers change. Effective cache/ledger versions also include a price
+content hash, so tier edits invalidate cached results automatically.
+See [pricing decisions](docs/DECISIONS.md) and [verification](docs/VERIFICATION.md).
 
 ## Architecture
 
@@ -70,7 +128,8 @@ Content-Type: application/json
 ~~~
 
 Response: model, tier, content, usage, cost, cache_hit, fallback_count, request_id;
-additive stop_reason and data_source identify completion and mock data. Validation
+additive stop_reason, data_source and resolved_model identify completion, mock
+data and the provider-returned model snapshot. Validation
 returns 400; unknown model/missing price 422; request budget rejection 402;
 unavailable spend storage/cap/eligible models or chain failure 503; deadline 504.
 Errors include request_id. Input limit is 32 KB. max_tokens defaults to 512, max
@@ -89,6 +148,15 @@ Every Make target calls a Python script:
 
 Example: make PYTHON=.venv/Scripts/python.exe test. Ruff is optional and was not
 run here; reported lint is the supplied offline checker.
+
+For the local Compose services, run the complete suite in PowerShell:
+
+~~~powershell
+$env:ROUTER_TEST_POSTGRES_DSN='postgresql://router:router@127.0.0.1:5432/router'
+$env:ROUTER_TEST_REDIS_URL='redis://127.0.0.1:6379/15'
+./.venv/Scripts/python.exe scripts/manage.py test
+./.venv/Scripts/python.exe scripts/manage.py lint
+~~~
 
 Set ROUTER_TEST_POSTGRES_DSN and/or ROUTER_TEST_REDIS_URL for optional dedicated
 local infrastructure tests. Postgres tests create/drop a unique test schema;
@@ -135,7 +203,10 @@ execution requires an explicit opt-in flag and final dev costs; it was not run.
 
 Dataset: 153 prompts, split 43 dev / 50 calibration / 60 held-out. Seed, checksum,
 licence, human subset and repeat subset are frozen. See [provenance](docs/DATASET.md).
-Classifier dev agreement is 20/43 tier labels (46.51%), not an answer-quality result.
+The classifier was reverted to the original frozen heuristic rules, with thresholds
+[2,5] unchanged. Dev agreement is low: 20/43 (46.51%). No held-out data was used.
+Answer quality is the outcome that matters; this diagnostic does not measure it
+or establish generalisation. See docs/DECISIONS.md.
 
 Blinded exports and calibration validation are in benchmark/ratings.py. Fifty
 individual calibration ratings are 25 paired A/B examples across tier/task strata.
@@ -143,12 +214,32 @@ No human ratings were collected; [calibration status](monitoring/calibration_sta
 is pending. The human-subset analyzer is benchmark/evaluate.py.
 See [benchmark workflow](docs/BENCHMARK.md) for formats and safeguards.
 
+## Explicit real-provider entry points (not run here)
+
+Install the optional real dependencies only when preparing a separately authorised
+real run. Configure verified model IDs and prices in a versioned JSON file; the
+cheap model prices are user-supplied; the other flat prices remain illustrative. All real entry points require both
+`--real` and environment variable `ROUTER_CONFIRM_REAL_SPEND=YES`; they require
+shared Postgres storage and enforce the configured USD 15 global / USD 3 evaluation caps.
+The USD 15 global cap is the user-approved real-spend limit.
+Use the same DATABASE_URL and REDIS_URL as the API so spend, RPM and model health
+are shared. Credentials are supplied through provider environment variables.
+
+- API: `python -m api.app --real` (optional `ROUTER_CONFIG` selects configuration).
+- Dev/calibration: `python -m benchmark.run --real --config <verified-config.json> --split dev --output <new-output.json>`.
+- Judge: `python -m benchmark.judge <real-artifact.json> --real`.
+
+Held-out additionally requires `--allow-held-out` and matching real dev results for
+preflight. No held-out command or real-provider call was executed in this review.
+The LiteLLM path was tested only with an in-memory stub and remains labelled
+`real-unverified`. Quality calibration and measured claims remain pending.
+
 ## Spec traceability (PLAN section 8)
 
 | Spec item | Honest delivery status |
 |---|---|
 | Complexity classifier | Implemented; feature/boundary tests ran; dev diagnostic reported |
-| Cost-aware routing (GPT-3.5 / Haiku / GPT-4o) | Configured Haiku / GPT-4.1 mini / GPT-4o chains; mock only; IDs/prices unverified, GPT-3.5 not probed |
+| Cost-aware routing (GPT-3.5 / Haiku / GPT-4o) | Configured Claude Haiku 5.5 / GPT-4.1 mini / GPT-4o chains; mock only; IDs/prices unverified, GPT-3.5 not probed |
 | Latency P95 and reroute | Per-model cooldown/probe leases implemented; clock tests ran; actual Redis/provider latency unverified |
 | Quality scoring (LLM-as-judge) | Async queue, rubric, caps, gate and alerts tested with fixtures; human calibration pending; operational routing gate closed |
 | Fallback | Mock retry/failure/deadline matrix ran |
@@ -170,9 +261,11 @@ criteria. [Verification](docs/VERIFICATION.md) records commands and actual resul
 - FastAPI/httpx, Postgres and Redis integration tests were skipped here. Dependency
   installation, Docker daemon and compose were unavailable. Core tests do not establish
   deployment correctness. Live PromQL checks and Grafana screenshots are pending.
-- LiteLLM/OpenAI/Anthropic/Ollama paths are unverified. Prices are illustrative
-  versioned mock prices, not verified current quotes. The normal API rejects real
-  mode; an explicitly enabled adapter can be separately injected. No key was read.
+- LiteLLM/OpenAI/Anthropic/Ollama paths are unverified. Cheap model prices were
+  supplied by the user and not independently verified against the provider page;
+  other flat prices remain illustrative mock prices. Explicit real entry points
+  require --real, ROUTER_CONFIRM_REAL_SPEND=YES and shared Postgres admission.
+  Adapter/composition tests used stubbed LiteLLM only; no key was read.
 - Human calibration, held-out ratings, held-out/real benchmark, quality/savings
   claims and real reproducibility remain pending. The spec's 40–60% savings figure
   is an untested hypothesis.
