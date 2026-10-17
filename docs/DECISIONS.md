@@ -1,5 +1,60 @@
 # Decisions and deviations
 
+## Results quality-source gate correction (2026-10-17)
+
+- Closes the two direct-call limitations in the read-only audit below. A
+  `validated_judge` label alone cannot authorize any B/C quality comparison or
+  accepted-response metric. The matching judge's calibration result must be
+  supplied as `judge_validated=True` (the boolean, not a truthy substitute).
+  No calibration report is promoted to validated by this change; the current
+  human-only decision remains in force and diagnostic judge sources stay
+  ineligible for quality conclusions.
+- Unvalidated judge sources report `quality_source="judge withheld: not validated"`.
+  Every withheld comparison includes a reason; accepted counts and
+  cost-per-accepted-response are null with an `accepted_reason`. Cost totals,
+  completion rates and paired cost savings retain their existing behavior.
+- Human B-versus-A comparisons remain independent of judge validation and require
+  exactly 60 rated pairs. Unrated outputs, including unrated failures, cannot
+  enter the human subset. Rated failures remain in the comparison; completed-only
+  sensitivity retains its existing behavior. C quality and accepted-response
+  metrics are withheld because the human fallback supplies only A/B ratings.
+  Acceptance also stays unknown when completed outputs lack scores.
+- Runner metadata and analysis now say `human pending` before human ratings are
+  supplied. Legacy analysis callers passing `pending` receive the same explicit
+  wording. In benchmark/run.py only the quality_source default was changed.
+- New tests in tests/test_results_gate.py use synthetic records and mocked runner
+  execution. They cover the 60-pair label bypass, diagnostic acceptance gate,
+  strict validation boolean, valid judge comparisons across all conditions,
+  missing scores, human independence/subset/failures, the 60-pair requirement,
+  pending wording, incomplete coverage and runner metadata/analysis wording.
+
+
+Verification with `./.venv/Scripts/python.exe`:
+
+- Targeted offline regression module: **11 tests passed**, no skips (0.216 s).
+- Full suite via `scripts/manage.py test`, run 1: **291 tests passed**, no skips
+  (54.326 s); run 2: **291 tests passed**, no skips (33.728 s).
+- Both runs exported
+  `ROUTER_TEST_POSTGRES_DSN=postgresql://router:router@127.0.0.1:5432/router`
+  and `ROUTER_TEST_REDIS_URL=redis://127.0.0.1:6379/0`, disabled bytecode writes,
+  set real-spend confirmation to NO, and used a temporary response journal.
+  Infrastructure tests used isolated stores; provider calls were mocked.
+- `scripts/manage.py lint` passed: **64 Python files**. Ruff with `--no-cache`
+  passed on benchmark/results.py, benchmark/run.py and tests/test_results_gate.py.
+  Repository-wide Ruff still reports the **3 pre-existing errors** recorded below:
+  E731 at tests/test_ledger_timeouts.py:300, F401 at tests/test_resolved_models.py:11
+  and F401 at tests/test_review_round2.py:5. These files are outside the brief's
+  scope and were left unchanged. `git diff --check` passed.
+- Full-suite logs are in
+  `C:/Users/nsena/AppData/Local/Temp/sol-results-gate-66a8japf/suite-1.log`
+  and `suite-2.log` in the same directory.
+- Only benchmark/results.py, benchmark/run.py, tests/test_results_gate.py and
+  docs/DECISIONS.md were edited. No real calls, API key reads, commits, pushes or
+  branch changes were performed. Existing results JSON, ratings and mapping files
+  were not modified. No calibration, held-out execution or judge validation was
+  performed by this correction.
+
+
 ## Automated judge dropped for quality conclusions (2026-10-17)
 
 - User decision: quality conclusions use **human ratings only**. The automated

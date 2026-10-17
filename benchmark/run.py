@@ -204,7 +204,7 @@ async def main(args):
     metadata = dict(data_source=source, config=config.data, git_commit=git_commit(), dataset_checksum=manifest["sha256"],
                     dataset_version=manifest["version"], model_ids=[m["id"] for m in config.models.values()],
                     price_table_version=config.version, seed=args.seed, split=args.split,
-                    preflight=preflight, prompt_count=len(prompts), quality_source="pending", judge_validated=False, storage=args.storage,
+                    preflight=preflight, prompt_count=len(prompts), quality_source="human pending", judge_validated=False, storage=args.storage,
                     benchmark_deadline_ms=config.benchmark_deadline_ms,
                     benchmark_max_tokens=config.benchmark_max_tokens,
                     repetition_rate=0, warm_pass_repetition_rate=1,
