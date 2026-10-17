@@ -23,36 +23,58 @@ def totals(ledger, run_id=None):
     return dict(inference_cost=str(inf), evaluation_cost=str(evaluation), total_cost=str(inf+evaluation))
 
 
-def analyse(records, n, seed=13, judge_validated=False, quality_source="pending", resamples=10000, data_source="mock"):
+def analyse(records, n, seed=13, judge_validated=False, quality_source="human pending", resamples=10000, data_source="mock"):
+    human = quality_source == "human"
+    validated_judge = quality_source == "validated_judge" and judge_validated is True
+    if "judge" in quality_source and judge_validated is not True:
+        quality_source = "judge withheld: not validated"
+    elif quality_source == "pending":
+        quality_source = "human pending"
+
+    def source_reason(condition):
+        if human:
+            return None if condition in {"A", "B"} else "Human ratings unavailable for this condition"
+        if validated_judge:
+            return None
+        if quality_source in {"human pending", "judge withheld: not validated"}:
+            return quality_source
+        return "Quality source unavailable"
+
     report = {}
     full = all(len([r for r in records if r["condition"] == c]) == n for c in CONDITIONS)
     for condition in CONDITIONS:
         rows = [r for r in records if r["condition"] == condition]
         costs = [float(r["cost"]) for r in rows] + [0.] * (n-len(rows))
-        accepted = (None if any(r.get("completed", False) and r.get("quality") is None for r in rows)
+        accepted_reason = source_reason(condition)
+        if accepted_reason is None and any(r.get("completed", False) and r.get("quality") is None for r in rows):
+            accepted_reason = "Missing quality scores on completed outputs"
+        accepted = (None if accepted_reason is not None
                     else sum(r.get("completed", False) and (r.get("quality") or 0) >= 4 for r in rows))
         report[condition] = dict(prompts=n, observed=len(rows),
             completion_rate=sum(r.get("completed", False) for r in rows)/n,
             total_cost=sum(costs), cost_per_prompt=sum(costs)/n,
             cost_per_prompt_ci=bootstrap_ci(costs, seed, resamples),
-            accepted=accepted, accepted_denominator="completed outputs with quality >=4",
+            accepted=accepted, accepted_reason=accepted_reason,
+            accepted_denominator="completed outputs with quality >=4",
             cost_per_accepted_response=sum(costs)/accepted if accepted else None)
     quality = {}
     by = {(r["prompt_id"], r["condition"]): r for r in records}
     prompts = sorted({r["prompt_id"] for r in records})
     for condition in ("B", "C-cold", "C-warm"):
-        if not full or quality_source not in {"human", "validated_judge"} or (not judge_validated and condition != "B"):
-            quality[condition] = {"supported": False, "reason": "incomplete or quality source unavailable"}
+        reason = source_reason(condition)
+        if reason is not None or not full:
+            quality[condition] = {"supported": False, "reason": reason or "Incomplete coverage"}
             continue
         pairs = [(by.get((p,"A")), by.get((p,condition))) for p in prompts]
         # A missing score on a completed answer is unknown, never silently assigned a pass.
         pairs = [(a,b) for a,b in pairs if a and b and
+                 (not human or (a.get("quality") is not None and b.get("quality") is not None)) and
                  (not a["completed"] or a.get("quality") is not None) and
                  (not b["completed"] or b.get("quality") is not None)]
-        if not judge_validated and len(pairs) != 60:
+        if human and len(pairs) != 60:
             quality[condition] = {"supported": False, "reason": "Need predeclared 60 human pairs"}
             continue
-        if judge_validated and len(pairs) != n:
+        if validated_judge and len(pairs) != n:
             quality[condition] = {"supported": False, "reason": "Missing judge scores"}
             continue
         quality[condition] = non_inferiority([a.get("quality",1) for a,b in pairs],
