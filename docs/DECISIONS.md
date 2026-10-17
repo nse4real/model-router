@@ -420,6 +420,12 @@ No commit, push or branch operation was performed by this implementation.
   outputs score 1; completed-only sensitivity and completion rates are separate.
   With an unvalidated judge, only the predeclared 60 human B/A pairs can support
   that comparison; C quality is withheld. Mock results never support a headline.
+- **Deviation (2026-10-17, user decision):** the human subset is 54 complete pairs,
+  not 60. The six excluded prompts (complex-001, -021, -028, -032, -039, -047) had an
+  incomplete A or B output and are left out of all human-subset analysis, including
+  cost and completion. This departs from the non-completed-as-1 rule. The 60-pair
+  gate is unchanged, so the B quality claim stays withheld; the 54-pair result is
+  descriptive only. See docs/BENCHMARK.md.
 - The load target defaults to the loopback HTTP API and verifies mock mode. An
   explicit in-process diagnostic is also provided. Local overhead excludes client
   scheduling before a concurrency slot is acquired; no real provider latency is

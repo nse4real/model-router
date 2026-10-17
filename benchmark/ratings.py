@@ -34,6 +34,14 @@ def export_ratings(artifact, output, mode="human-held-out", seed=13):
             for group in buckets.values():
                 if group and len(ids) < 25:
                     ids.append(group.pop())
+    elif mode == "human-complete-pairs":
+        # Only prompts whose A and B outputs both completed with HTTP 200; the rest are reported, not rated.
+        complete = lambda p: all(by.get((p, c), {}).get("completed") is True and
+                                 by.get((p, c), {}).get("status") == 200 for c in ("A", "B"))
+        ids = [p for p in manifest["human_subset"] if complete(p)]
+        excluded = [p for p in manifest["human_subset"] if not complete(p)]
+        if not ids:
+            raise ValueError("Complete-pair export requires at least 1 complete A/B pair")
     else:
         ids = manifest["human_subset"]
     public, private = [], []
@@ -56,14 +64,17 @@ def export_ratings(artifact, output, mode="human-held-out", seed=13):
     output.mkdir(parents=True,exist_ok=False)
     for name, value in (("ratings-blinded.json",public),("mapping-private.json",private)):
         (output/name).write_text(json.dumps(redact(value),indent=2),encoding="utf8")
-    return dict(pairs=len(ids),individual_ratings=2*len(ids),seed=seed)
+    result = dict(pairs=len(ids),individual_ratings=2*len(ids),seed=seed)
+    if mode == "human-complete-pairs":
+        result["excluded_prompt_ids"] = excluded
+    return result
 
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--artifact")
     p.add_argument("--output",default="results/ratings")
-    p.add_argument("--mode",choices=["calibration","human-held-out"],default="calibration")
+    p.add_argument("--mode",choices=["calibration","human-held-out","human-complete-pairs"],default="calibration")
     p.add_argument("--validate-calibration")
     args = p.parse_args()
     if args.validate_calibration:

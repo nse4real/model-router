@@ -10,6 +10,16 @@ are withheld unless also human-rated; the existing human fallback withholds C.
 A matching real dev run is still required for preflight, and held-out execution
 still requires explicit approval. No real calls are authorized by this update.
 
+**Deviation (2026-10-17, user decision).** The human subset is **54 complete pairs**,
+not the predeclared 60. Six prompts had an incomplete A or B output: complex-001,
+complex-021, complex-028, complex-032, complex-039 and complex-047. They are excluded
+from all human-subset analysis, including cost and completion. This departs from
+PLAN.md section 5.7, which scores non-completed outputs as 1. The 60-pair gate in
+`benchmark/results.py` is unchanged, so the B quality claim stays withheld. The
+54-pair result is reported descriptively only: one blinded rater, mean rating A 4.32,
+B 4.52, mean difference +0.20, with no significance test or interval yet. Scores
+cluster at 5 (78 of 108), so a ceiling effect is possible.
+
 V1, v2 and v3 on mid returned constant 5s; v3 on frontier (`gpt-4o`) had
 near-zero paired-difference correlation. All failed validation; evidence is in
 `results/judge-calibration-run5*-report.json`. Existing calibration ratings are

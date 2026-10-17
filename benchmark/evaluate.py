@@ -13,13 +13,17 @@ def apply_human(artifact, ratings, mapping):
     _, manifest = load_dataset()
     if artifact.get("dataset_checksum") != manifest["sha256"]:
         raise ValueError("Dataset checksum mismatch")
-    expected = set(manifest["human_subset"])
-    if len(mapping) != 60 or {m["prompt_id"] for m in mapping} != expected:
-        raise ValueError("Require exactly the predeclared 60 pairs")
-    scores = {r["blind_id"]:r for r in ratings}
-    if len(scores) != 60 or len(ratings) != 60:
-        raise ValueError("Require 60 unique blinded rating rows")
     by = {(r["prompt_id"],r["condition"]):r for r in artifact["records"]}
+    # Excluded prompts are exactly the predeclared prompts whose A or B output did not complete with HTTP 200.
+    complete = lambda p: all(by.get((p,c),{}).get("completed") is True and by[p,c].get("status") == 200
+                             for c in ("A","B"))
+    excluded = {p for p in manifest["human_subset"] if not complete(p)}
+    kept = set(manifest["human_subset"]) - excluded
+    if {m["prompt_id"] for m in mapping} != kept or len(mapping) != len(kept):
+        raise ValueError("Mapping must cover exactly the complete predeclared pairs")
+    scores = {r["blind_id"]:r for r in ratings}
+    if len(scores) != len(kept) or len(ratings) != len(kept):
+        raise ValueError("Require one unique blinded rating row per kept pair")
     for m in mapping:
         values = scores[m["blind_id"]]
         for side in ("left","right"):
@@ -27,11 +31,13 @@ def apply_human(artifact, ratings, mapping):
             if type(value) is not int or not 1 <= value <= 5:
                 raise ValueError("Human ratings must be integers 1..5")
             c = m["left_condition"] if side == "left" else ("B" if m["left_condition"] == "A" else "A")
-            row = by[m["prompt_id"],c]
-            row["quality"] = value if row["completed"] else 1
-    n = artifact["analysis"]["conditions"]["A"]["prompts"]
-    artifact["analysis"] = analyse(artifact["records"],n,artifact["seed"],quality_source="human",
+            by[m["prompt_id"],c]["quality"] = value
+    # Excluded prompts are left out of every analysis, including cost and completion.
+    subset = [r for r in artifact["records"] if r["prompt_id"] in kept]
+    artifact["analysis"] = analyse(subset,len(kept),artifact["seed"],quality_source="human",
                                    data_source=artifact.get("data_source", "mock"))
+    artifact["excluded_prompt_ids"] = sorted(excluded)
+    artifact["human_pairs"] = len(kept)
     artifact["quality_source"] = "human"
     artifact["judge_validated"] = False
     return artifact

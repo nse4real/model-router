@@ -163,6 +163,17 @@ class RatingsCompletePairsTests(unittest.TestCase):
         self.assertEqual(sorted(strata.values()), [2] * 11 + [3])
         self.assertEqual({r["left_condition"] for r in first[2]}, {"A", "B"})
 
+    def test_complete_pair_mode_excludes_incomplete_prompts_and_reports_them(self):
+        self.rows[0]["split"] = "held-out"
+        self.artifact["records"][0]["completed"] = False
+        self.artifact["records"][0]["status"] = 503
+        result, public, private = self.export(mode="human-complete-pairs")
+        self.assertEqual(result, dict(pairs=59, individual_ratings=118, seed=13,
+                                      excluded_prompt_ids=["fixture-00"]))
+        self.assertNotIn("fixture-00", {r["prompt_id"] for r in private})
+        self.assertTrue(all(r["left_completed"] and r["right_completed"] for r in private))
+        self.assertEqual(len(public), 59)
+
     def test_held_out_keeps_manifest_selection_and_maps_each_sides_completion(self):
         self.rows[0]["split"] = "held-out"
         self.artifact["records"][0]["completed"] = False

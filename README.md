@@ -199,7 +199,7 @@ savings intervals; paired non-inferiority with margin -0.3 and 10,000 bootstrap
 resamples; and a fixed 30-prompt reproducibility comparison. Non-completed outputs
 score 1; completion rate and completed-only sensitivity remain separate. Unknown
 quality never passes. C quality is withheld without a validated judge. Held-out
-execution requires an explicit opt-in flag and final dev costs; it was not run.
+execution requires an explicit opt-in flag and final dev costs. It has now been run once: results/held-out-real-1.json holds 240 of 240 records with HTTP 200 and USD 0.2115 spend, and its human analysis is in the deviation note above and docs/BENCHMARK.md.
 
 Dataset: 153 prompts, split 43 dev / 50 calibration / 60 held-out. Seed, checksum,
 licence, human subset and repeat subset are frozen. See [provenance](docs/DATASET.md).
@@ -210,8 +210,13 @@ or establish generalisation. See docs/DECISIONS.md.
 
 Blinded exports and calibration validation are in benchmark/ratings.py. Fifty
 individual calibration ratings are 25 paired A/B examples across tier/task strata.
-No human ratings were collected; [calibration status](monitoring/calibration_status.json)
-is pending. The human-subset analyzer is benchmark/evaluate.py.
+Calibration human ratings are still pending; [calibration status](monitoring/calibration_status.json)
+records that. The held-out human subset has been rated by one blinded rater: 54 complete
+pairs, not the predeclared 60. Six prompts with an incomplete A or B output are excluded
+from all human analysis. The B quality claim stays withheld by the 60-pair gate. The
+54-pair result is descriptive only: mean rating A 4.32, B 4.52, difference +0.20, with no
+significance test or interval yet. See docs/BENCHMARK.md for the full deviation.
+The human-subset analyzer is benchmark/evaluate.py.
 See [benchmark workflow](docs/BENCHMARK.md) for formats and safeguards.
 
 ## Explicit real-provider entry points (not run here)
@@ -248,7 +253,7 @@ The LiteLLM path was tested only with an in-memory stub and remains labelled
 | Cost ledger | Postgres reservation/settlement/recovery implemented; SQLite contract double tested/reconciled; real Postgres unverified |
 | Grafana dashboard | JSON, provisioning and formulas supplied; fixture values tested; rendering/screenshots unavailable |
 | Ollama | Optional configurable LiteLLM path exists, unverified and uncalled |
-| Benchmark and load test | Dev mock run and local in-process load diagnostic ran; held-out/real benchmark and HTTP load not run |
+| Benchmark and load test | Dev mock run, local in-process load diagnostic, and one real held-out benchmark run (240 of 240 records, USD 0.2115) ran; HTTP load test not run |
 | Docker | Compose/Dockerfile supplied; startup unverified: daemon/compose unavailable |
 
 [Acceptance coverage](docs/TEST_MATRIX.md) distinguishes offline, partial and unmet

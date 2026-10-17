@@ -179,6 +179,8 @@ Terminal outcomes: success, 402, 503, 504. No silent degradation.
 
 **Human-rated quality scope.** If the judge fails its gate, the quality claim covers **B vs A only**, using the 60-pair human subset (5.7). The C-cold and C-warm quality claims are then withheld and the README says so. Cost claims for C are still reported.
 
+**Deviation (2026-10-17, user decision).** The human subset was run as **54 complete pairs**. Six predeclared prompts with an incomplete A or B output (complex-001, complex-021, complex-028, complex-032, complex-039, complex-047) were excluded from all human-subset analysis, including cost and completion. This departs from the non-completed-as-1 rule above for those six prompts. The 60-pair gate is unchanged, so the B quality claim is withheld. Reported descriptively only; see docs/BENCHMARK.md.
+
 **Reproducibility.** The results file records git commit, dataset checksum, model IDs, price-table version, seed, timestamp and any sample-size reduction. The second run is a fixed 30-prompt subset of the held-out split, run under the same conditions. Reproducibility is judged as: the second run's cost per prompt falls within the first run's per-prompt cost 95% bootstrap CI for that subset, and quality is within the same CI. A fixed percentage tolerance is not used. Live outputs are not identical between runs, and the README says so.
 
 **Load test.** Async generator against the API with **mock providers only**. Fixed workload: N requests, concurrency C, duration D, hardware described. Pass: error rate below 1% and local overhead P95 below a stated threshold. Results labelled mock.
