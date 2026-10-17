@@ -1,34 +1,51 @@
-"""Score an existing MOCK artifact; every judge call reserves shared spend."""
+"""Score an artifact with guarded providers and durable shared spend admission."""
 import argparse
 import asyncio
 from decimal import Decimal
 import json
 import os
 from pathlib import Path
-from uuid import uuid5, NAMESPACE_URL
+from uuid import uuid4, uuid5, NAMESPACE_URL
 from api.contracts import Request
 from benchmark.dataset import load_dataset
 from benchmark.results import analyse, write_results
-from fallback.providers import MockJudgeProvider, Output
+from fallback.providers import MockJudgeProvider, Output, real_provider
 from monitoring.ledger import PostgresLedger, SQLiteLedger
 from monitoring.quality import Quality
 from routing.config import Config
+from routing.admission import shared_admission
+from routing.latency import Health
 
 
-async def judge(path):
+async def judge(path, real=False):
     path = Path(path)
     artifact = json.loads(path.read_text())
-    if artifact.get("data_source") != "mock":
-        raise ValueError("Only mock artifacts may be judged")
-    ledger = (SQLiteLedger(path.with_suffix(".sqlite")) if artifact.get("storage") == "test-double"
+    is_real = artifact.get("data_source") != "mock"
+    if is_real:
+        if artifact.get("storage") != "postgres":
+            raise ValueError("Real entry points require shared Postgres spend admission")
+        provider = real_provider(real)
+    elif real:
+        raise ValueError("--real cannot be used to judge a mock artifact")
+    else:
+        provider = MockJudgeProvider()
+    config = Config(data=artifact.get("config"))
+    caps = dict(cap=config.data["global_cap_usd"], evaluation_cap=config.data["evaluation_cap_usd"])
+    ledger = (SQLiteLedger(path.with_suffix(".sqlite"), **caps) if artifact.get("storage") == "test-double"
               else PostgresLedger(os.environ.get("DATABASE_URL",
-                                   "postgresql://router:router@localhost:5432/router")))
+                                   "postgresql://router:router@localhost:5432/router"), **caps))
     records = artifact.pop("records")
     rows, manifest = load_dataset()
     if artifact["dataset_checksum"] != manifest["sha256"]:
         raise ValueError("Dataset version mismatch")
     prompts = {r["id"]:r["prompt"] for r in rows}
-    q = Quality(ledger,Config(),MockJudgeProvider(),benchmark=True,sample_rate=1)
+    admission = shared_admission(config.slo_ms) if artifact.get("storage") == "postgres" else None
+    # A fresh invocation must not inherit live, generation or prior judge cooldowns.
+    health = (admission.health if admission else Health(slo_ms=config.slo_ms)).for_benchmark(
+        str(uuid4()))
+    q = Quality(ledger, config, provider, benchmark=True, sample_rate=1,
+                health=health,
+                rate=admission.rate if admission else None)
     for record in records:
         if not record["completed"]:
             record["quality"] = 1
@@ -44,15 +61,18 @@ async def judge(path):
     for record in records:
         record["cost"] = str(sum((Decimal(str(a["cost"])) for a in
                                   ledger.attempts(record["request_id"])),Decimal(0)))
-    artifact["quality_source"] = "diagnostic_mock_judge"
+    artifact["quality_source"] = "diagnostic_real_judge" if is_real else "diagnostic_mock_judge"
     artifact["judge_validated"] = False
     n = artifact["analysis"]["conditions"]["A"]["prompts"]
-    artifact["analysis"] = analyse(records,n,artifact["seed"],quality_source="diagnostic_mock_judge")
+    artifact["analysis"] = analyse(records,n,artifact["seed"],quality_source=artifact["quality_source"],
+                                    data_source=artifact["data_source"])
     return write_results(path,ledger,artifact["run_id"],artifact,records)
 
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("artifact")
-    result = asyncio.run(judge(p.parse_args().artifact))
-    print(json.dumps({"data_source":"mock","final":result["final"],"quality_claim":"withheld"}))
+    p.add_argument("--real", action="store_true")
+    args = p.parse_args()
+    result = asyncio.run(judge(args.artifact, real=args.real))
+    print(json.dumps({"data_source":result["data_source"],"final":result["final"],"quality_claim":"withheld"}))

@@ -10,10 +10,19 @@ from monitoring.security import redact
 
 
 def export_ratings(artifact, output, mode="human-held-out", seed=13):
+    output = Path(output)
+    if output.exists():
+        raise FileExistsError(f"Refusing to overwrite existing output directory: {output}")
     rows, manifest = load_dataset()
     rng = random.Random(seed)
+    by = {(r["prompt_id"],r["condition"]):r for r in artifact["records"]}
     if mode == "calibration":
-        candidates = [r for r in rows if r["split"] == "calibration"]
+        candidates = [r for r in rows if r["split"] == "calibration" and all(
+            by.get((r["id"], c), {}).get("completed") is True and
+            by.get((r["id"], c), {}).get("status") == 200 for c in ("A", "B"))]
+        if not candidates:
+            raise ValueError("Calibration export requires at least 1 complete A/B pair "
+                             "(both completed=True and status=200)")
         # Round-robin strata before selection keeps the 25 pairs diverse.
         buckets = {}
         for row in candidates:
@@ -21,13 +30,12 @@ def export_ratings(artifact, output, mode="human-held-out", seed=13):
         for group in buckets.values():
             rng.shuffle(group)
         ids = []
-        while len(ids) < 25:
+        while len(ids) < 25 and any(buckets.values()):
             for group in buckets.values():
                 if group and len(ids) < 25:
                     ids.append(group.pop())
     else:
         ids = manifest["human_subset"]
-    by = {(r["prompt_id"],r["condition"]):r for r in artifact["records"]}
     public, private = [], []
     data = {r["id"]:r for r in rows}
     for prompt_id in ids:
@@ -37,14 +45,15 @@ def export_ratings(artifact, output, mode="human-held-out", seed=13):
         rng.shuffle(conditions)
         blind_id = hashlib.sha256(f"{seed}:{prompt_id}".encode()).hexdigest()[:16]
         public.append(dict(blind_id=blind_id,prompt=data[prompt_id]["prompt"],
-                           left=by[prompt_id,conditions[0]].get("content","[not completed]"),
-                           right=by[prompt_id,conditions[1]].get("content","[not completed]"),
+                           left=by[prompt_id,conditions[0]].get("content",""),
+                           right=by[prompt_id,conditions[1]].get("content",""),
                            left_rating=None,right_rating=None))
         private.append(dict(blind_id=blind_id,prompt_id=prompt_id,left_condition=conditions[0],
-                            tier=data[prompt_id]["tier"], task_type=data[prompt_id]["task_type"]))
+                            tier=data[prompt_id]["tier"], task_type=data[prompt_id]["task_type"],
+                            left_completed=by[prompt_id,conditions[0]].get("completed", False),
+                            right_completed=by[prompt_id,conditions[1]].get("completed", False)))
     rng.shuffle(public)
-    output = Path(output)
-    output.mkdir(parents=True,exist_ok=True)
+    output.mkdir(parents=True,exist_ok=False)
     for name, value in (("ratings-blinded.json",public),("mapping-private.json",private)):
         (output/name).write_text(json.dumps(redact(value),indent=2),encoding="utf8")
     return dict(pairs=len(ids),individual_ratings=2*len(ids),seed=seed)

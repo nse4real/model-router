@@ -30,7 +30,8 @@ def apply_human(artifact, ratings, mapping):
             row = by[m["prompt_id"],c]
             row["quality"] = value if row["completed"] else 1
     n = artifact["analysis"]["conditions"]["A"]["prompts"]
-    artifact["analysis"] = analyse(artifact["records"],n,artifact["seed"],quality_source="human")
+    artifact["analysis"] = analyse(artifact["records"],n,artifact["seed"],quality_source="human",
+                                   data_source=artifact.get("data_source", "mock"))
     artifact["quality_source"] = "human"
     artifact["judge_validated"] = False
     return artifact
@@ -46,4 +47,4 @@ if __name__ == "__main__":
     result = apply_human(*(json.loads(Path(f).read_text()) for f in (a.artifact,a.ratings,a.mapping)))
     Path(a.output).parent.mkdir(parents=True,exist_ok=True)
     Path(a.output).write_text(json.dumps(redact(result),indent=2),encoding="utf8")
-    print("Wrote human-subset analysis; C quality claims withheld; data source remains mock")
+    print("Wrote human-subset analysis; C quality claims withheld; data source preserved")

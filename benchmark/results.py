@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from statistics import mean
 from monitoring.security import redact
+from monitoring.settlement import SettlementJournal
 from benchmark.statistics import bootstrap_ci, non_inferiority, paired_savings
 
 CONDITIONS = ("A", "B", "C-cold", "C-warm")
@@ -22,7 +23,7 @@ def totals(ledger, run_id=None):
     return dict(inference_cost=str(inf), evaluation_cost=str(evaluation), total_cost=str(inf+evaluation))
 
 
-def analyse(records, n, seed=13, judge_validated=False, quality_source="pending", resamples=10000):
+def analyse(records, n, seed=13, judge_validated=False, quality_source="pending", resamples=10000, data_source="mock"):
     report = {}
     full = all(len([r for r in records if r["condition"] == c]) == n for c in CONDITIONS)
     for condition in CONDITIONS:
@@ -63,9 +64,12 @@ def analyse(records, n, seed=13, judge_validated=False, quality_source="pending"
             savings[condition] = paired_savings(
                 [float(by[p,"A"]["cost"]) for p in prompts],
                 [float(by[p,condition]["cost"]) for p in prompts], seed, resamples)
-    return dict(coverage_complete=full, headline_claim_supported=False, savings_mock=savings,
+    return dict(coverage_complete=full, headline_claim_supported=False,
+                **{"savings_mock" if data_source == "mock" else "savings_measured": savings},
                 quality_source=quality_source, conditions=report, quality=quality,
-                note="Mock data cannot support measured cost savings or answer quality claims")
+                note=("Mock data cannot support measured cost savings or answer quality claims"
+                      if data_source == "mock" else
+                      "Real provider results; quality claims require the predeclared validation and ratings"))
 
 
 def reproducibility(first_records, second_records, subset, seed=13, resamples=10000):
@@ -91,8 +95,44 @@ def reproducibility(first_records, second_records, subset, seed=13, resamples=10
 
 def write_results(path, ledger, run_id, metadata, records):
     final = ledger.barrier(run_id)
-    payload = dict(metadata, run_id=run_id, data_source="mock", final=final,
-                   timestamp=datetime.now(timezone.utc).isoformat(), records=records)
+    request_ids = {r["request_id"] for r in ledger.requests(run_id)}
+    attempts = [a for a in ledger.attempts() if a["parent_request_id"] in request_ids]
+    journal = {e["attempt_id"]: e for e in SettlementJournal().entries()}
+    by_request = {}
+    resolutions = {}
+    for attempt in attempts:
+        identity = (attempt["model"], attempt["resolved_model"], attempt["purpose"])
+        resolutions[identity] = resolutions.get(identity, 0) + 1
+        by_request.setdefault(attempt["parent_request_id"], []).append(dict(
+            attempt_id=attempt["attempt_id"], requested_model=attempt["model"],
+            resolved_model=attempt["resolved_model"], purpose=attempt["purpose"],
+            state=attempt["state"], cost=str(attempt["cost"]), cost_status=attempt["cost_status"],
+            latency_ms=float(attempt["latency_ms"]) if attempt["latency_ms"] is not None else None,
+            error=json.loads(attempt["error"]) if attempt["error"] else None,
+            settlement_status=(journal[attempt["attempt_id"]]["status"]
+                               if attempt["attempt_id"] in journal else None)))
+    exported = []
+    for record in records:
+        record_attempts = by_request.get(record.get("request_id"), [])
+        statuses = {a["settlement_status"] for a in record_attempts if a["settlement_status"]}
+        if statuses:
+            record = dict(record, settlement_status="unknown" if "unknown" in statuses else "settlement_retried")
+        # Cache hits retain the originating response identity without inventing
+        # a paid call. Recovery/judging refresh all attempt identities from SQL.
+        exported.append(dict(record, requested_model=record.get("requested_model", record.get("model")),
+                             resolved_model=record.get("resolved_model"), attempts=record_attempts,
+                             # Refresh full-completion timings from SQL, including judges.
+                             attempt_latencies=[dict(attempt_id=a["attempt_id"], latency_ms=a["latency_ms"])
+                                                for a in record_attempts]))
+    payload = dict(metadata, run_id=run_id, data_source=metadata.get("data_source", "mock"), final=final,
+                   timestamp=datetime.now(timezone.utc).isoformat(), records=exported,
+                   resolved_model_ids=sorted({a["resolved_model"] for a in attempts
+                                              if a["resolved_model"] is not None}),
+                   model_resolutions=[dict(requested_model=requested, resolved_model=resolved,
+                                           purpose=purpose, calls=count)
+                                      for (requested, resolved, purpose), count in sorted(
+                                          resolutions.items(), key=lambda item: (
+                                              item[0][0], item[0][1] or "", item[0][2]))])
     if final:
         payload["totals"] = totals(ledger, run_id)
     else:
