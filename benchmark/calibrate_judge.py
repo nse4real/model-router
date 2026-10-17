@@ -38,8 +38,8 @@ class Rubric:
 
 
 def load_rubric(version):
-    if version not in ("v1", "v2"):
-        raise ValueError("Rubric must be v1 or v2")
+    if version not in ("v1", "v2", "v3"):
+        raise ValueError("Rubric must be v1, v2 or v3")
     path = Path(__file__).resolve().parents[1] / "monitoring" / f"judge_prompt_{version}.md"
     raw = path.read_bytes()
     # Match read_text's newline handling while hashing the exact file bytes.
@@ -115,18 +115,28 @@ def load_pairs(artifact, ratings, mapping):
     return pairs
 
 
-def parse_score(content):
-    """Strict JSON object and integer score, including rejecting duplicate keys."""
+def _parse_judge_response(content):
+    """Accept score-only or reasoning/score JSON, without coercion or extra text."""
     def object_pairs(items):
         if len(dict(items)) != len(items):
             raise ValueError("Duplicate judge JSON keys")
         return dict(items)
 
-    parsed = json.loads(content, object_pairs_hook=object_pairs)
-    if (not isinstance(parsed, dict) or set(parsed) != {"score"}
+    def reject_constant(value):
+        raise ValueError("Invalid JSON constant: " + value)
+
+    parsed = json.loads(content, object_pairs_hook=object_pairs, parse_constant=reject_constant)
+    if (not isinstance(parsed, dict) or set(parsed) not in ({"score"}, {"reasoning", "score"})
             or type(parsed["score"]) is not int or not 1 <= parsed["score"] <= 5):
-        raise ValueError("Expected exactly {\"score\": integer in 1..5}")
-    return parsed["score"]
+        raise ValueError("Expected integer score in 1..5 and optional reasoning text only")
+    if "reasoning" in parsed and not isinstance(parsed["reasoning"], str):
+        raise ValueError("Judge reasoning must be text")
+    return parsed
+
+
+def parse_score(content):
+    """Only the JSON score field determines the score; reasoning is diagnostic."""
+    return _parse_judge_response(content)["score"]
 
 
 class StrictJudgeProvider:
@@ -137,25 +147,31 @@ class StrictJudgeProvider:
         self.raw_debug, self.debug_file = raw_debug, debug_file
         self.calls = 0
         self.context = {}
+        self.reasoning = None
 
     async def complete(self, model, request, timeout):
         self.calls += 1
         call = self.calls
+        self.error = self.reasoning = None
         result = await self.provider.complete(model, request, timeout)
-        if call <= self.raw_debug and self.debug_file is not None:
-            try:
-                self.debug_file.write(json.dumps(dict(self.context, call=call,
-                                                      raw_text=result.content)) + "\n")
-                self.debug_file.flush()
-            except Exception:
-                # Diagnostics must never bypass parsing or paid-usage settlement.
-                LOG.warning("Could not write raw judge diagnostic for call %s", call)
+        parsed = None
         try:
-            parse_score(result.content)
+            parsed = _parse_judge_response(result.content)
             if result.stop_reason != "stop":
                 raise ValueError("Judge response did not complete normally")
         except (ValueError, TypeError):
             self.error = "Malformed or incomplete judge response"
+        else:
+            self.reasoning = parsed.get("reasoning")
+        if call <= self.raw_debug and self.debug_file is not None:
+            try:
+                self.debug_file.write(json.dumps(dict(self.context, call=call,
+                    raw_text=result.content, reasoning=parsed.get("reasoning") if parsed else None)) + "\n")
+                self.debug_file.flush()
+            except Exception:
+                # Diagnostics must never bypass parsing or paid-usage settlement.
+                LOG.warning("Could not write raw judge diagnostic for call %s", call)
+        if self.error is not None:
             # Quality settles the original usage before rejecting this missing score.
             # No fallback score is introduced; paid responses stay accounted for.
             return replace(result, content="{}")
@@ -224,6 +240,8 @@ def load_unresolved(pairs, previous, previous_report, run_id, rubric=None):
                 attempt = failure["attempt_id"]
             elif type(score) is not int or not 1 <= score <= 5:
                 raise ValueError("Invalid prior judge rating; rerun accepts only unresolved calls")
+            if isinstance(old.get("reasoning_" + side), str):
+                pair["reasoning_" + side] = old["reasoning_" + side]
             pair["judge_" + side] = score
             pair["attempt_" + side] = attempt or _attempt_id(run_id, pair["records"][side]["request_id"], rubric or "v1")
     if not unresolved or unresolved != failures.keys():
@@ -268,7 +286,7 @@ async def score_pairs(pairs, ledger, config, provider, run_id, admission, *, rer
     quality = Quality(ledger, config, strict, benchmark=True, sample_rate=1,
                       timeout=config.judge_calibration_timeout_s,
                       health=admission.health.for_benchmark(str(uuid4())), rate=admission.rate,
-                      rubric=rubric.text)
+                      rubric=rubric.text, max_tokens=config.judge_calibration_max_tokens)
     results = [] if results is None else results
     failures = [] if failures is None else failures
     cancelled = False
@@ -280,6 +298,8 @@ async def score_pairs(pairs, ledger, config, provider, run_id, admission, *, rer
             dict(role="system", content="Answer accurately and concisely."),
             dict(role="user", content=pair["prompt"])]))
         for side in ("a", "b"):
+            if isinstance(pair.get("reasoning_" + side), str):
+                result["reasoning_" + side] = pair["reasoning_" + side]
             record = pair["records"][side]
             parent = record["request_id"]
             if rerun and result["judge_" + side] is not None:
@@ -287,7 +307,7 @@ async def score_pairs(pairs, ledger, config, provider, run_id, admission, *, rer
                 continue
             attempt = str(uuid4()) if rerun else _attempt_id(run_id, parent, rubric)
             result["attempt_" + side] = attempt
-            strict.error = None
+            strict.error = strict.reasoning = None
             strict.context = dict(blind_id=pair["blind_id"], prompt_id=pair["prompt_id"],
                                   side=side, attempt_id=attempt)
             job_args = (attempt, parent, "benchmark", request, Output(record["content"], 0, 0))
@@ -311,6 +331,8 @@ async def score_pairs(pairs, ledger, config, provider, run_id, admission, *, rer
                 score = job["score"]
                 if score in (1, 2, 3, 4, 5):
                     result["judge_" + side] = int(score)
+            if strict.reasoning is not None:
+                result["reasoning_" + side] = strict.reasoning
             if result["judge_" + side] is None:
                 reason = strict.error or quality.failure_reasons.get(attempt)
                 if not reason:
@@ -414,7 +436,7 @@ def main(argv=None):
     parser.add_argument("--output", default=OUTPUT)
     parser.add_argument("--report")
     parser.add_argument("--real", action="store_true")
-    parser.add_argument("--rubric", choices=("v1", "v2"), default="v1")
+    parser.add_argument("--rubric", choices=("v1", "v2", "v3"), default="v1")
     parser.add_argument("--raw-debug", type=int, default=0,
                         help="Capture the first N raw judge responses in <output-stem>-raw-debug.jsonl")
     parser.add_argument("--rerun-unresolved", help="Previous pair output; retry only its unresolved calls")

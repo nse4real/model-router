@@ -21,6 +21,8 @@ class Config:
             raise ValueError("benchmark_max_tokens must be an integer in 1..2048")
         if type(self.judge_calibration_timeout_s) is not int or not 1 <= self.judge_calibration_timeout_s <= 60:
             raise ValueError("judge_calibration_timeout_s must be an integer in 1..60")
+        if type(self.judge_calibration_max_tokens) is not int or not 1 <= self.judge_calibration_max_tokens <= 512:
+            raise ValueError("judge_calibration_max_tokens must be an integer in 1..512")
         for chain in self.chains.values():
             for alias in chain:
                 self.model(alias)
@@ -40,6 +42,10 @@ class Config:
     @property
     def judge_calibration_timeout_s(self):
         return self.data.get("judge_calibration_timeout_s", 30)
+
+    @property
+    def judge_calibration_max_tokens(self):
+        return self.data.get("judge_calibration_max_tokens", 256)
 
     @property
     def version(self):

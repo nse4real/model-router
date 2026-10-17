@@ -150,7 +150,7 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
                 dict(role="system", content="Answer accurately and concisely."),
                 dict(role="user", content=self.ratings[index // 2]["prompt"])])
             self.assertEqual(payload["answer"], self.artifact["records"][(index // 2) * 4 + index % 2]["content"])
-            self.assertEqual(request.max_tokens, 32)
+            self.assertEqual(request.max_tokens, 256)
         attempts = self.ledger.attempts()
         self.assertEqual(len(attempts), 50)
         self.assertTrue(all(a["purpose"] == "evaluation" and a["state"] == "settled" for a in attempts))
