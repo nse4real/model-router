@@ -1,5 +1,74 @@
 # Decisions and deviations
 
+## Automated judge dropped for quality conclusions (2026-10-17)
+
+- User decision: quality conclusions use **human ratings only**. The automated
+  judge is dropped for quality conclusions; scores are diagnostic only. This
+  supersedes earlier descriptions of a pending judge gate.
+- V1, v2 and v3 on `mid` (`openai/gpt-4.1-mini`) failed: each completed
+  25-pair calibration produced 50 constant scores of 5, with undefined
+  paired-difference correlation. V3 on `frontier` (`openai/gpt-4o`) also failed:
+  49 scores of 5 and one of 4, with near-zero overall Spearman correlation
+  (0.017875392369168804) and no positive correlation interval excluding zero.
+  Evidence: `results/judge-calibration-run5*-report.json`, especially the
+  `rerun2`, `v2`, `v3` and `gpt4o` reports and corresponding pair files.
+- Human calibration ratings already exist: **50 separate scores on 25 pairs**
+  in `results/ratings-calibration-run5/ratings-blinded.json`. These do not
+  replace held-out evaluation.
+- Follow PLAN.md section 5.7 (quality; the user's "4.4" refers to this section):
+  restrict the conclusion to **B versus A** on **60 blinded, randomised held-out
+  A/B pairs**, selected by seed before any scoring. Quality source is human
+  ratings, pending that subset. C-cold and C-warm quality conclusions are
+  withheld unless also human-rated; the current fallback implementation
+  withholds C. Cost reporting remains separate.
+- Held-out execution still needs a matching **real dev run for preflight** and
+  **explicit approval**. This documentation/check task authorizes neither run.
+
+Read-only code audit (production code unchanged):
+
+- `benchmark/run.py:52-53` disables benchmark quality routing;
+  `monitoring/quality.py:103-104` requires enabled, validated and non-benchmark
+  status before raising a route. Calibration must pass every gate and stratum
+  (`monitoring/quality.py:69-82`).
+- `benchmark/run.py:88` initializes scores to null; line 207 records
+  `quality_source="pending", judge_validated=False`; line 222 calls `analyse`
+  with pending/unvalidated defaults (`benchmark/results.py:26`). The literal
+  report value is **pending**, not "human pending". Human ratings pending is
+  the intended interpretation, documented here without changing code.
+- `benchmark/results.py:43-46` withholds B/C non-inferiority conclusions for
+  unavailable sources and C when unvalidated; lines 52-54 require 60 pairs for
+  unvalidated B. `benchmark/judge.py:64-68` labels judge scores diagnostic and
+  unvalidated, so this entry point withholds B/C conclusions.
+  `benchmark/evaluate.py:33-36` labels the human fallback human/unvalidated.
+- Limitation: `benchmark/results.py:44` accepts `quality_source="validated_judge"`
+  even with `judge_validated=False`. A direct caller supplying 60 scored pairs
+  can reach the B non-inferiority calculation at lines 58-60 using judge scores.
+  No inspected CLI supplies that combination. Also, accepted counts/costs at
+  lines 33-39 use available scores without a source/validation gate, so diagnostic
+  judging can populate those secondary quality-dependent metrics. Neither path
+  should be treated as a human quality conclusion. Reported for follow-up only;
+  no production-code fix is part of this docs-only task.
+
+Verification for this docs-only decision:
+
+- `./.venv/Scripts/python.exe scripts/manage.py test`, twice with
+  `ROUTER_TEST_POSTGRES_DSN=postgresql://router:router@127.0.0.1:5432/router`
+  and `ROUTER_TEST_REDIS_URL=redis://127.0.0.1:6379/0`: **280 tests passed**
+  each run (34.149 s and 45.593 s), no failures or skips. Providers were mocked;
+  `ROUTER_CONFIRM_REAL_SPEND=NO` was set for both runs.
+- `./.venv/Scripts/python.exe scripts/manage.py lint`: syntax/hygiene passed,
+  **63 Python files**. Additional `-m ruff check --no-cache .`: **3 existing
+  errors** (E731 at `tests/test_ledger_timeouts.py:300`; F401 at
+  `tests/test_resolved_models.py:11` and `tests/test_review_round2.py:5`).
+  Test code was unchanged under the docs-only constraint. `git diff --check`
+  passed.
+- An in-memory synthetic 60-pair check confirmed pending withholds B/C and
+  reproduced the direct-call B limitation above; it wrote no artifacts and made
+  no provider calls. Only docs/DECISIONS.md and docs/BENCHMARK.md were edited.
+  PLAN.md, code, config, results, ratings and mapping files were unchanged.
+  No API key values were read or printed; no real calls, commits, pushes or
+  branch changes were performed.
+
 ## One full-completion latency SLO and per-run health (2026-10-17)
 
 - User decision: **ONE latency SLO = 20000 ms**, configured by `slo_ms` in

@@ -1,5 +1,25 @@
 # Benchmark and human evaluation workflow
 
+## Current quality source: human ratings pending (2026-10-17)
+
+The automated judge is dropped for quality conclusions. Quality conclusions
+come from **human ratings only**, pending the **60-pair blinded held-out A/B
+subset**, selected by seed before any scoring under PLAN.md section 5.7.
+The conclusion covers **B versus A only**. C-cold and C-warm quality conclusions
+are withheld unless also human-rated; the existing human fallback withholds C.
+A matching real dev run is still required for preflight, and held-out execution
+still requires explicit approval. No real calls are authorized by this update.
+
+V1, v2 and v3 on mid returned constant 5s; v3 on frontier (`gpt-4o`) had
+near-zero paired-difference correlation. All failed validation; evidence is in
+`results/judge-calibration-run5*-report.json`. Existing calibration ratings are
+**50 separate scores on 25 pairs** in
+`results/ratings-calibration-run5/ratings-blinded.json`, not the held-out subset.
+See DECISIONS.md for the audit and reporting limitations. The runner currently
+serializes `quality_source="pending"` and `judge_validated=False`; it does not
+literally serialize "human pending". Historical judge workflows below remain
+diagnostic and do not supersede this human-only decision.
+
 ## Full-completion latency and health isolation
 
 `config/models.json` defines one `slo_ms: 20000` for the live API, benchmark
@@ -151,7 +171,7 @@ For a real artifact use benchmark.judge with --real and the environment
 confirmation. Real generation uses run-scoped Redis health keys and the API's
 shared RPM keys; the separate judge entry point retains its existing health
 admission. Both retain shared Postgres caps and the artifact's frozen configuration. Scores
-remain diagnostic until human calibration validates the judge. All adapter tests
+remain diagnostic under the current human-only decision. All adapter tests
 use a stubbed LiteLLM client, with no credentials or provider network calls.
 
 The calibration split has 50 prompts. Seeded round-robin selection supplies 25
@@ -179,7 +199,8 @@ Gate requirements: >=50 individual human ratings, within-one agreement >=0.80;
 paired-difference judge-minus-human bias and its bootstrap CI entirely within
 [-0.2,+0.2]; positive Spearman agreement on paired differences with CI excluding
 zero; every tier/task breakdown must pass. Degenerate/inadequate strata fail.
-No actual ratings were supplied: the operational gate is pending and disabled.
+Actual calibration ratings now exist (50 scores on 25 run-5 pairs), but all
+tested judge variants failed the gate. Judge-based quality conclusions are dropped.
 
 If the gate is unvalidated, the quality conclusion is restricted to B vs A on
 exactly the 60 predeclared blinded human pairs. Export mode human-held-out and
@@ -195,7 +216,8 @@ Accepted means completed and quality >=4; unknown quality makes acceptance
 unknown, never a pass. Cost per accepted response is secondary and states its
 denominator. Inference, evaluation and total cost are separate.
 
-Paired non-inferiority compares B-A and, only with a validated judge, C-A. Use
+Current paired non-inferiority compares B-A on the human-rated subset; C quality
+conclusions are withheld unless also human-rated. Use
 10,000 prompt-pair bootstrap resamples, a two-sided 95% percentile CI and margin
 -0.3: lower CI bound must be strictly greater than -0.3. Non-completed outputs
 score 1 before pairing; completion rates and completed-only sensitivity are
