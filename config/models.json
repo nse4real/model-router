@@ -11,6 +11,7 @@
   "benchmark_deadline_ms": 60000,
   "benchmark_max_tokens": 1024,
   "judge_calibration_timeout_s": 30,
+  "judge_calibration_max_tokens": 256,
   "models": {
     "cheap": {
       "id": "anthropic/claude-haiku-5-5",

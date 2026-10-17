@@ -66,7 +66,7 @@ class JudgeV2Tests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(request.messages[0]["content"], load_rubric(version).text)
                     payload = json.loads(request.messages[1]["content"])
                     self.assertEqual(set(payload), {"messages", "answer"})
-                    self.assertEqual(request.max_tokens, 32)
+                    self.assertEqual(request.max_tokens, 256)
 
     def test_rubric_hash_uses_exact_file_bytes(self):
         for version in ("v1", "v2"):

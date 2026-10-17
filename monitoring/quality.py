@@ -85,7 +85,7 @@ def validate_calibration(pairs, seed=13, resamples=10000):
 class Quality:
     def __init__(self, ledger, config, provider, validated=False, enabled=False,
                  benchmark=False, queue_size=100, sample_rate=.1, seed=13, timeout=5, health=None, rate=None, clock=time.monotonic,
-                 rubric=None):
+                 rubric=None, max_tokens=32):
         self.ledger, self.config, self.provider = ledger, config, provider
         self.admission = Admission(health or Health(slo_ms=config.slo_ms), rate)
         self.clock = clock
@@ -98,6 +98,7 @@ class Quality:
         self.recovery = defaultdict(list)
         self.failure_reasons = {}
         self.rubric = rubric
+        self.max_tokens = max_tokens
 
     def raised(self, route):
         return self.enabled and self.validated and not self.benchmark and route in self.alerts
@@ -167,7 +168,7 @@ class Quality:
             rubric = self.rubric if self.rubric is not None else Path(__file__).with_name("judge_prompt_v1.md").read_text()
             judge_request = Request.parse(dict(messages=[dict(role="system", content=rubric),
                  dict(role="user", content=json.dumps(dict(messages=list(request.messages),
-                                                           answer=output.content)))], max_tokens=32))
+                                                           answer=output.content)))], max_tokens=self.max_tokens))
             worst = self.config.reserve_cost(alias, judge_request)
             permit = self.admission.acquire(model)
             if permit is None:

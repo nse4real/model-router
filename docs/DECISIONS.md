@@ -1354,3 +1354,111 @@ Verification for the versioned-rubric brief:
   No real calls were made. API key values were not read or printed. Existing
   results, ratings, mapping and production ledger rows were not modified; no
   commit, push or branch change was performed.
+
+
+### Brief reasoning rubric v3 and calibration output limit (2026-10-17)
+
+V3 was chosen AFTER seeing both v1 and v2 return 5 for all 50 rated outputs
+on the same 25 pairs. This is adaptive development on reused human-rated data,
+not a clean validation. Even a gate pass on these pairs would not remove that
+limitation; independent, predeclared human-rated data are needed for clean
+validation. No judge validation or quality claim is established by this change.
+
+The judge remains the configured mid model, openai/gpt-4.1-mini. V3 keeps v2's
+1..5 scale and all anchors, asks for one or two brief sentences checking the
+answer against the prompt (including empty, cut-off, off-topic or wrong answers),
+then an integer score. Its strict JSON shape is
+`{"reasoning": "<one or two sentences>", "score": <integer 1..5>}`.
+V1 and v2 rubric files are unchanged. `--rubric v3` is opt-in; v1 remains the
+default. Existing exact-file-byte SHA-256 provenance is recorded in new pair
+rows and reports; v3 uses its own version/hash attempt namespace and cannot
+mix rubric versions or hashes in an unresolved-only rerun.
+
+`judge_calibration_max_tokens` is 256 in config/models.json. Config validates
+an integer in 1..512 without coercion (including rejecting booleans), and older
+configs without this setting also default to 256. Only benchmark.calibrate_judge
+passes it to Quality. Both reservation and provider request use the same limit,
+for every calibration rubric. Live and ordinary benchmark judges retain their
+32-token limit and five-second timeout. Calibration retains its configured
+30-second timeout, spend guards, caps, settlement and cancellation behavior.
+
+Calibration parsing accepts the legacy score-only JSON or reasoning/score JSON.
+It takes the score only from the integer `score` field in 1..5, never from
+reasoning or a fallback. Invalid JSON, duplicate keys, nonstandard JSON constants,
+extra fields/text, strings/floats/booleans used as scores and abnormal stop reasons
+are rejected. Optional reasoning must be text; its contents never change the
+score. Malformed returned calls still settle their original usage before being
+recorded as quality_unknown. Reasoning is saved as `reasoning_a`/`reasoning_b`
+in new pair outputs for diagnostics only and carried forward in unresolved
+reruns. It is not used by the calibration gate. Existing idempotent completed
+jobs are not replayed to reconstruct missing diagnostic text.
+
+`--raw-debug N` still preserves exact returned raw text for the first N
+actually dispatched calls and now includes a separate `reasoning` field (null
+when no valid reasoning/score object is available). Diagnostic write errors
+cannot change scores or usage settlement. Dry runs create no files and do not
+initialize providers or ledger connections.
+
+All new tests in tests/test_judge_v3.py use synthetic fixtures, temporary local
+ledgers and mock providers. No paid calls, production recovery or paid reruns
+are part of this work. Existing results, ratings, mapping and production ledger
+rows are not modified. PLAN.md is unchanged. No API key values are read or
+printed, and no commits, pushes or branch changes are made.
+
+Mock-only regression test names in `tests/test_judge_v3.py`:
+
+- `test_calibration_limit_default_and_integer_bounds`
+- `test_all_calibration_rubrics_use_256_for_reservation_and_request`
+- `test_configured_calibration_limit_reaches_reservation_and_request`
+- `test_live_and_benchmark_judges_keep_32_for_reservation_and_request`
+- `test_strict_parse_accepts_v3_and_reasoning_never_changes_score`
+- `test_strict_parse_rejects_invalid_json_scores_extra_text_and_duplicates`
+- `test_v3_selection_hash_and_reasoning_recorded_in_rows_report_and_debug`
+- `test_invalid_v3_is_unknown_but_preserves_raw_text_and_settles_usage`
+- `test_v3_debug_failure_does_not_change_score_or_settlement`
+- `test_v3_dry_run_creates_no_files_or_provider`
+- `test_cli_accepts_v3`
+- `test_strict_adapter_resets_diagnostics_between_calls_and_rejects_cutoff`
+- `test_v3_uses_fresh_attempts_and_rejects_mixed_rerun_provenance`
+- `test_v3_preserves_scale_and_anchors_and_requires_brief_reasoning_first`
+
+Verification using `./.venv/Scripts/python.exe`:
+
+- Targeted new module: 14 tests passed, no skips (0.764 s).
+- Full suite run 1: 269 tests, no skips (32.505 s); FAILED with three assertion
+  failures across two existing test methods (267 methods passed).
+- Full suite run 2: 269 tests, no skips (31.591 s); the identical three assertion
+  failures across the identical two existing methods (267 methods passed).
+- Both full runs used `scripts/manage.py test` with
+  `ROUTER_TEST_POSTGRES_DSN=postgresql://router:router@127.0.0.1:5432/router` and
+  `ROUTER_TEST_REDIS_URL=redis://127.0.0.1:6379/0` exported, disabled bytecode
+  writes, set real-spend confirmation to NO, and used temporary response journals.
+  Infrastructure tests use isolated test stores; new provider calls are mocks.
+- The failures are `test_only_50_rated_outputs_and_no_condition_or_human_metadata_reach_judge`
+  at tests/test_calibrate_judge.py:153, and both v1/v2 subtests of
+  `test_rubric_selection_reaches_system_message_without_metadata` at
+  tests/test_judge_v2.py:69. Each still asserts calibration max_tokens == 32;
+  the new required limit is 256. Those files are outside this brief's allowed
+  scope and are deliberately unchanged. The full suite is therefore NOT green;
+  those three assertions need updating in a separately authorized scope.
+- `scripts/manage.py lint` passed: 63 Python files.
+- `-m benchmark.calibrate_judge --rubric v3` completed without `--real` and
+  printed exactly:
+
+```json
+{"dry_run": true, "pairs": 25, "planned_calls": 50, "rubric": "v3", "rubric_sha256": "9d784ca89f52d4a26f0f997b84f6b768126f6ec26e7aaf1e70da7305da7c57be"}
+```
+
+- The default v1 dry run still printed exactly
+  `{"dry_run": true, "pairs": 25, "planned_calls": 50}`.
+- Git diff checks confirm PLAN.md, frozen v1/v2 rubrics and the two older test
+  files are unchanged. Only the seven permitted paths are changed:
+  monitoring/judge_prompt_v3.md, config/models.json, routing/config.py,
+  benchmark/calibrate_judge.py, monitoring/quality.py, tests/test_judge_v3.py
+  and docs/DECISIONS.md. Scoped whitespace checks passed.
+- Full-suite logs are in
+  `C:/Users/nsena/AppData/Local/Temp/sol-judge-v3-20261017/suite-1.log` and
+  `C:/Users/nsena/AppData/Local/Temp/sol-judge-v3-20261017/suite-2.log`.
+- Not verified: real-provider scoring, whether v3 or the larger output limit
+  improves calibration, paid reruns, and independent statistical validation.
+  No real calls were made, as required.
