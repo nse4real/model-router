@@ -11,7 +11,7 @@
   "panels": [
     {
       "id": 1,
-      "title": "Cost per 1,000 API requests (mock)",
+      "title": "Cost per 1,000 API requests (shared ledger)",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
@@ -49,7 +49,7 @@
     },
     {
       "id": 2,
-      "title": "Model distribution: successful requests (mock)",
+      "title": "Model distribution: successful requests (shared ledger)",
       "type": "piechart",
       "datasource": {
         "type": "prometheus",
@@ -79,7 +79,7 @@
     },
     {
       "id": 3,
-      "title": "Inference cost USD (mock)",
+      "title": "Inference cost USD (shared ledger)",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
@@ -117,7 +117,7 @@
     },
     {
       "id": 4,
-      "title": "Evaluation cost USD (mock)",
+      "title": "Evaluation cost USD (shared ledger)",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
@@ -155,7 +155,7 @@
     },
     {
       "id": 5,
-      "title": "Total incurred or reserved USD (mock)",
+      "title": "Total incurred or reserved USD (shared ledger)",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
@@ -193,7 +193,7 @@
     },
     {
       "id": 6,
-      "title": "API error fraction (mock)",
+      "title": "API error fraction (shared ledger)",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
@@ -231,7 +231,7 @@
     },
     {
       "id": 7,
-      "title": "Cache hit fraction (mock)",
+      "title": "Cache hit fraction (shared ledger)",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
@@ -269,7 +269,7 @@
     },
     {
       "id": 8,
-      "title": "Additional attempts (mock)",
+      "title": "Additional attempts (shared ledger)",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
@@ -307,7 +307,7 @@
     },
     {
       "id": 9,
-      "title": "Unknown outcome attempts (mock)",
+      "title": "Unknown outcome attempts (shared ledger)",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
@@ -345,7 +345,7 @@
     },
     {
       "id": 10,
-      "title": "Matched benchmark savings (mock; pending)",
+      "title": "Matched benchmark savings (shared ledger; pending)",
       "type": "stat",
       "datasource": {
         "type": "prometheus",

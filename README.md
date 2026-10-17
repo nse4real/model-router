@@ -251,7 +251,7 @@ The LiteLLM path was tested only with an in-memory stub and remains labelled
 | Redis caching | Exact adapter supplied; adversarial/contract tests ran; real Redis integration skipped |
 | Redis rate tracking | Atomic per-model/minute cap, fail open; offline tests ran; real Redis integration skipped |
 | Cost ledger | Postgres reservation/settlement/recovery implemented; SQLite contract double tested/reconciled; real Postgres unverified |
-| Grafana dashboard | JSON and provisioning load; Prometheus scrapes the API. Nine of ten panels return data (checked via the Grafana and Prometheus APIs, not visually). The savings panel is empty by design (pending). Panels labelled "mock" read the shared Postgres ledger, so their cost values include earlier real-run spend. |
+| Grafana dashboard | JSON and provisioning load; Prometheus scrapes the API. Nine of ten panels return data (checked via the Grafana and Prometheus APIs, not visually). The savings panel is empty by design (pending). Panels are labelled "shared ledger" because they read the Postgres ledger, which includes earlier real-run spend. |
 | Ollama | Optional configurable LiteLLM path exists, unverified and uncalled |
 | Benchmark and load test | Dev mock run, local in-process load diagnostic (p95 0.5 ms, passes), and one real held-out benchmark run (240 of 240 records, USD 0.2115) ran. HTTP load test on the Docker stack, mock provider (N=100, C=10): 0 errors and p95 local overhead of 42 to 48 ms across three runs, against a 50 ms threshold. Before the connection pool, p95 was 1,902 ms; the cause was a new Postgres connection for each of 9 ledger operations per request. The margin to the threshold is small. |
 | Docker | Compose/Dockerfile supplied; startup unverified: daemon/compose unavailable |
