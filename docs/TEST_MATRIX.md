@@ -183,7 +183,7 @@ are skipped here: HTTP transport, Postgres and Redis.
 | 5.7 agreement/bias/correlation CIs and breakdown gate | Covered on fixtures | validation_pass, bias_and_breakdown_gate, degenerate_correlation_fails; actual validation pending |
 | 5.7 bounded async sampling and job idempotency | Covered offline | queue tests, valid_judge_attribution_idempotency, durable_judging_idempotent_dev_fixture |
 | 5.7 benchmark quality routing disabled | Covered offline | benchmark and validated/enabled flag tests |
-| 5.7 60 blinded human held-out A/B pairs | Tooling supplied; not met | Manifest fixes IDs; held-out execution and human rating intentionally not run |
+| 5.7 60 blinded human held-out A/B pairs | Partial; deviation | Held-out run executed (240/240 records, USD 0.2115). One blinded rater rated 54 complete pairs; six excluded (incomplete A or B). 60-pair gate unchanged, so B quality claim withheld; 54-pair result descriptive only (docs/BENCHMARK.md) |
 | 5.8 one request row and one row per paid call | Covered in double | success/cache/fallback and idempotency assertions |
 | 5.8 judge parent attribution and distinct cost scopes | Covered in double | settlement_idempotency_and_judge_attribution; valid_judge_attribution_idempotency |
 | 5.8 finalisation barrier for attempts and jobs | Covered offline | finalisation_barrier_and_redaction; no totals before barrier |
