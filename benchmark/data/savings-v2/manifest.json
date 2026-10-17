@@ -1,0 +1,10 @@
+{
+  "version": "v2-savings",
+  "sha256": "e117e675672df6a8e68cb7ebdd011e9811f9d661b20eebf6ebad5499d3c56a0f",
+  "seed": 13,
+  "counts": {
+    "savings": 60
+  },
+  "licence": "MIT",
+  "notes": "Assistant-authored savings split, disjoint from dataset v1. Not human-rated."
+}

@@ -145,7 +145,7 @@ class BenchmarkAndMetricsTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("router_matched_savings_ratio",exported)
         dashboard = json.loads(Path("monitoring/grafana/dashboards/router.json").read_text(encoding="utf8"))
         self.assertEqual(len(dashboard["panels"]),10)
-        self.assertTrue(all("mock" in p["title"].lower() for p in dashboard["panels"]))
+        self.assertTrue(all("shared ledger" in p["title"].lower() for p in dashboard["panels"]))
 
     async def test_finalisation_barrier_and_redaction(self):
         ledger = SQLiteLedger(clock=lambda:0)
