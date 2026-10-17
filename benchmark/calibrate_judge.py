@@ -1,4 +1,4 @@
-"""Calibrate the mid judge on the 25 blinded run-5 pairs (dry run by default)."""
+"""Calibrate a selected judge on the 25 blinded run-5 pairs (dry run by default)."""
 import argparse
 import asyncio
 from contextlib import ExitStack, contextmanager
@@ -195,16 +195,25 @@ def _exclusive_outputs(output, report, debug=None):
         yield created[0][1], created[1][1], created[2][1] if debug is not None else None
 
 
-def _attempt_id(run_id, parent, rubric="v1"):
+def _attempt_id(run_id, parent, rubric="v1", judge_alias="mid", judge_model=None):
     if isinstance(rubric, Rubric):
         rubric = rubric.version + (":" + rubric.sha256 if rubric.version != "v1" else "")
+    # Preserve legacy mid identities; another judge must never reuse mid scores.
+    if judge_alias != "mid":
+        rubric += ":" + judge_alias + ":" + judge_model
     return str(uuid5(NAMESPACE_URL, run_id + ":" + parent + ":judge-calibration-" + rubric))
 
 
-def load_unresolved(pairs, previous, previous_report, run_id, rubric=None):
+def load_unresolved(pairs, previous, previous_report, run_id, rubric=None, *,
+                    judge_alias=None, judge_model=None, legacy_model=None):
     """Carry completed ratings forward; retry only null scores with audit identity."""
     rows = _unique(json.loads(previous.read_text(encoding="utf8")), "blind_id")
     report = json.loads(previous_report.read_text(encoding="utf8"))
+    if judge_alias is not None:
+        for metadata in [report, *rows.values()]:
+            if (metadata.get("judge_alias", "mid") != judge_alias
+                    or metadata.get("judge_model", legacy_model) != judge_model):
+                raise ValueError("Rerun judge alias/model mismatch; score all pairs into new outputs instead")
     if rubric is not None:
         # Legacy outputs have no rubric metadata and belong to v1 only.
         for metadata in [report, *rows.values()]:
@@ -243,7 +252,8 @@ def load_unresolved(pairs, previous, previous_report, run_id, rubric=None):
             if isinstance(old.get("reasoning_" + side), str):
                 pair["reasoning_" + side] = old["reasoning_" + side]
             pair["judge_" + side] = score
-            pair["attempt_" + side] = attempt or _attempt_id(run_id, pair["records"][side]["request_id"], rubric or "v1")
+            pair["attempt_" + side] = attempt or _attempt_id(run_id,
+                pair["records"][side]["request_id"], rubric or "v1", judge_alias or "mid", judge_model)
     if not unresolved or unresolved != failures.keys():
         raise ValueError("Rerun requires exactly the reported unresolved calls")
 
@@ -271,8 +281,16 @@ def check_recovered(pairs, ledger):
 
 
 async def score_pairs(pairs, ledger, config, provider, run_id, admission, *, rerun=False,
-                      results=None, failures=None, rubric="v1", raw_debug=0, debug_file=None):
+                      results=None, failures=None, rubric="v1", raw_debug=0, debug_file=None,
+                      judge_alias=None):
     """Reuse Quality's rubric, reservation, dispatch, settlement and unknown states."""
+    judge_alias = config.judge_calibration if judge_alias is None else judge_alias
+    if not isinstance(judge_alias, str) or judge_alias not in config.models:
+        raise ValueError("Unknown calibration judge alias")
+    judge_model = config.model(judge_alias)["id"]
+    # Quality uses 'judge' for calls, reservations and settlement. Isolate this
+    # override so live and ordinary benchmark consumers keep their own judge.
+    calibration_config = Config(data=dict(config.data, judge=judge_alias))
     if rerun:
         check_recovered(pairs, ledger)
     # Initialize companion metadata before reading either new or legacy jobs.
@@ -283,7 +301,7 @@ async def score_pairs(pairs, ledger, config, provider, run_id, admission, *, rer
         pass  # Per-call failures below still produce a report without dispatch.
     rubric = load_rubric(rubric) if isinstance(rubric, str) else rubric
     strict = StrictJudgeProvider(provider, raw_debug, debug_file)
-    quality = Quality(ledger, config, strict, benchmark=True, sample_rate=1,
+    quality = Quality(ledger, calibration_config, strict, benchmark=True, sample_rate=1,
                       timeout=config.judge_calibration_timeout_s,
                       health=admission.health.for_benchmark(str(uuid4())), rate=admission.rate,
                       rubric=rubric.text, max_tokens=config.judge_calibration_max_tokens)
@@ -293,6 +311,7 @@ async def score_pairs(pairs, ledger, config, provider, run_id, admission, *, rer
     for pair in pairs:
         result = {k: pair[k] for k in ("human_a", "human_b", "judge_a", "judge_b",
                                        "tier", "task_type", "blind_id", "prompt_id")}
+        result.update(judge_alias=judge_alias, judge_model=judge_model)
         results.append(result)
         request = Request.parse(dict(messages=[
             dict(role="system", content="Answer accurately and concisely."),
@@ -305,7 +324,7 @@ async def score_pairs(pairs, ledger, config, provider, run_id, admission, *, rer
             if rerun and result["judge_" + side] is not None:
                 result["attempt_" + side] = pair["attempt_" + side]
                 continue
-            attempt = str(uuid4()) if rerun else _attempt_id(run_id, parent, rubric)
+            attempt = str(uuid4()) if rerun else _attempt_id(run_id, parent, rubric, judge_alias, judge_model)
             result["attempt_" + side] = attempt
             strict.error = strict.reasoning = None
             strict.context = dict(blind_id=pair["blind_id"], prompt_id=pair["prompt_id"],
@@ -350,8 +369,14 @@ async def score_pairs(pairs, ledger, config, provider, run_id, admission, *, rer
 
 async def calibrate(artifact=ARTIFACT, ratings=RATINGS, mapping=MAPPING, output=OUTPUT,
                     real=False, report=None, rerun_unresolved=None, rerun_report=None,
-                    rubric="v1", raw_debug=0):
+                    rubric="v1", raw_debug=0, judge_alias=None):
     rubric = load_rubric(rubric)
+    config = Config()
+    explicit_judge = judge_alias is not None
+    judge_alias = config.judge_calibration if judge_alias is None else judge_alias
+    if not isinstance(judge_alias, str) or judge_alias not in config.models:
+        raise ValueError("Unknown calibration judge alias")
+    judge_model = config.model(judge_alias)["id"]
     if type(raw_debug) is not int or raw_debug < 0:
         raise ValueError("--raw-debug must be a nonnegative integer")
     output = Path(output)
@@ -374,18 +399,20 @@ async def calibrate(artifact=ARTIFACT, ratings=RATINGS, mapping=MAPPING, output=
             previous.stem + "-report.json")
         if {p.resolve() for p in paths} & {previous.resolve(), previous_report.resolve()}:
             raise ValueError("Rerun requires new output and report files")
-        load_unresolved(pairs, previous, previous_report, artifact["run_id"], rubric)
+        load_unresolved(pairs, previous, previous_report, artifact["run_id"], rubric,
+                        judge_alias=judge_alias, judge_model=judge_model,
+                        legacy_model=config.model("mid")["id"])
     plan = dict(dry_run=not real, pairs=len(pairs), planned_calls=sum(
         p["judge_" + side] is None for p in pairs for side in ("a", "b")))
     if rubric.version != "v1":
         plan.update(rubric.metadata)
+    # Keep the legacy implicit-mid dry-run response unchanged.
+    if explicit_judge or judge_alias != "mid":
+        plan.update(judge_alias=judge_alias, judge_model=judge_model)
     if raw_debug:
         plan.update(raw_debug=raw_debug, raw_debug_file=str(debug))
     if not real:
         return plan
-    config = Config()
-    if config.data["judge"] != "mid":
-        raise ValueError("Calibration requires the configured judge alias mid")
     provider = real_provider(True)
 
     def open_ledger():
@@ -404,7 +431,8 @@ async def calibrate(artifact=ARTIFACT, ratings=RATINGS, mapping=MAPPING, output=
         try:
             await score_pairs(pairs, ledger, config, provider, artifact["run_id"], admission,
                               rerun=bool(rerun_unresolved), results=results, failures=failures,
-                              rubric=rubric, raw_debug=raw_debug, debug_file=debug_file)
+                              rubric=rubric, raw_debug=raw_debug, debug_file=debug_file,
+                              judge_alias=judge_alias)
         except asyncio.CancelledError:
             cancelled = True
         for row in results:
@@ -415,8 +443,8 @@ async def calibrate(artifact=ARTIFACT, ratings=RATINGS, mapping=MAPPING, output=
         if raw_debug:
             validation.update(raw_debug=raw_debug, raw_debug_file=str(debug))
         validation["unknown_outputs"] = failures
-        validation["judge_alias"] = "mid"
-        validation["judge_model"] = config.model("mid")["id"]
+        validation["judge_alias"] = judge_alias
+        validation["judge_model"] = judge_model
         validation["source_run_id"] = artifact["run_id"]
         if rerun_unresolved:
             validation["rerun_of"] = str(previous)
@@ -437,6 +465,8 @@ def main(argv=None):
     parser.add_argument("--report")
     parser.add_argument("--real", action="store_true")
     parser.add_argument("--rubric", choices=("v1", "v2", "v3"), default="v1")
+    parser.add_argument("--judge-alias", choices=("mid", "frontier"),
+                        help="Calibration judge (default: configured judge_calibration alias)")
     parser.add_argument("--raw-debug", type=int, default=0,
                         help="Capture the first N raw judge responses in <output-stem>-raw-debug.jsonl")
     parser.add_argument("--rerun-unresolved", help="Previous pair output; retry only its unresolved calls")

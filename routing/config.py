@@ -15,6 +15,10 @@ class Config:
         self.models = self.data["models"]
         self.chains = self.data["chains"]
         self.provider_version = self.data.get("provider_config_version", "1")
+        if (not isinstance(self.judge_calibration, str)
+                or self.judge_calibration not in self.models):
+            raise ValueError("judge_calibration must name an existing model alias")
+        self.model(self.judge_calibration)
         if type(self.benchmark_deadline_ms) is not int or not 1 <= self.benchmark_deadline_ms <= 60000:
             raise ValueError("benchmark_deadline_ms must be an integer in 1..60000")
         if type(self.benchmark_max_tokens) is not int or not 1 <= self.benchmark_max_tokens <= 2048:
@@ -38,6 +42,10 @@ class Config:
     @property
     def benchmark_max_tokens(self):
         return self.data.get("benchmark_max_tokens", 1024)
+
+    @property
+    def judge_calibration(self):
+        return self.data.get("judge_calibration", "mid")
 
     @property
     def judge_calibration_timeout_s(self):

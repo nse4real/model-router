@@ -1462,3 +1462,74 @@ Verification using `./.venv/Scripts/python.exe`:
 - Not verified: real-provider scoring, whether v3 or the larger output limit
   improves calibration, paid reruns, and independent statistical validation.
   No real calls were made, as required.
+
+
+### Calibration-only judge selection (2026-10-17)
+
+`judge_calibration` defaults to `mid` (openai/gpt-4.1-mini), including for
+older configs without the setting, and must name an existing model alias.
+`benchmark.calibrate_judge --judge-alias {mid,frontier}` overrides that default
+for calibration only. `frontier` resolves to openai/gpt-4o. Live and ordinary
+benchmark judges continue using the separate, unchanged `judge` setting.
+A private config copy supplies the selected alias to the existing Quality
+reservation, provider call and actual-usage price lookup. Every new pair row
+and report records `judge_alias` and `judge_model`. Explicit selections and
+non-mid configured defaults also appear in the printed dry-run plan; the
+legacy implicit-mid dry-run shape and attempt identities remain unchanged.
+Non-mid attempts include the alias and model ID in their namespace, preventing
+reuse of mid scores. Unresolved-only reruns reject alias/model mismatches in
+both the previous pair rows and report; legacy metadata belongs to mid.
+
+GPT-4o is the same model that produced condition A answers. Self-preference
+bias is therefore possible and is a limitation of this calibration. Choosing
+GPT-4o with the v3 rubric remains adaptive development on the same human-rated
+data; it does not establish independent judge validation or a quality claim.
+
+The --real and ROUTER_CONFIRM_REAL_SPEND guards, global and evaluation caps,
+durable ledger accounting, rubric selection and exact-byte SHA-256, raw-debug
+handling, 256-token calibration default and blinded judge input are preserved.
+No condition labels are sent to the judge. This change makes no paid calls;
+real-provider behavior and whether GPT-4o improves calibration remain unverified.
+
+
+New mock-only regression tests in `tests/test_calibrate_judge.py`:
+
+- `test_calibration_judge_defaults_to_mid_including_legacy_config`
+- `test_calibration_judge_config_rejects_unknown_and_non_string_aliases`
+- `test_frontier_call_reservation_and_settlement_use_selected_model`
+- `test_selected_judge_written_to_every_output_row_and_report`
+- `test_configured_judge_default_and_explicit_override`
+- `test_unknown_judge_alias_rejected_before_provider_or_ledger`
+- `test_frontier_keeps_confirmation_guard_and_evaluation_cap`
+- `test_live_and_benchmark_judges_stay_mid_with_frontier_calibration`
+- `test_frontier_uses_fresh_attempts_and_reuses_only_its_own_completed_jobs`
+- `test_unresolved_rerun_rejects_changed_judge_alias_or_model`
+- `test_cli_frontier_selection_and_unknown_alias_rejection`
+
+
+Verification with `./.venv/Scripts/python.exe`:
+
+- Targeted calibration/v2/v3 modules: 71 tests passed, no skips (7.408 s).
+- Full suite run 1: 280 tests passed, no skips (34.460 s).
+- Full suite run 2: 280 tests passed, no skips (34.581 s).
+- Both full runs used `scripts/manage.py test` with
+  `ROUTER_TEST_POSTGRES_DSN=postgresql://router:router@127.0.0.1:5432/router`
+  and `ROUTER_TEST_REDIS_URL=redis://127.0.0.1:6379/0` exported. Real-spend
+  confirmation was NO, bytecode writes were disabled, and response journals
+  and test logs were placed in the system temporary directory. Infrastructure
+  tests used isolated test stores; provider calls were mocked.
+- `scripts/manage.py lint` passed: 63 Python files.
+- Dry run: `-m benchmark.calibrate_judge --rubric v3 --judge-alias frontier`
+  (without `--real`) printed:
+
+```json
+{"dry_run": true, "pairs": 25, "planned_calls": 50, "rubric": "v3", "rubric_sha256": "9d784ca89f52d4a26f0f997b84f6b768126f6ec26e7aaf1e70da7305da7c57be", "judge_alias": "frontier", "judge_model": "openai/gpt-4o"}
+```
+
+No real calls, API key reads, commits, pushes or branch changes were made.
+Only config/models.json, routing/config.py, benchmark/calibrate_judge.py,
+tests/test_calibrate_judge.py and docs/DECISIONS.md were edited. PLAN.md,
+results, ratings, mapping and production ledger rows were not modified.
+Real-provider scoring, paid reruns and statistical calibration improvement
+remain unverified. Full-suite logs are `sol-judge-alias-suite1.log` and
+`sol-judge-alias-suite2.log` in the system temporary directory.

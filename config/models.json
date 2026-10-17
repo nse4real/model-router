@@ -72,5 +72,6 @@
       "cheap"
     ]
   },
-  "judge": "mid"
+  "judge": "mid",
+  "judge_calibration": "mid"
 }

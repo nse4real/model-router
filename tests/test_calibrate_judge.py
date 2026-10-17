@@ -11,7 +11,7 @@ import threading
 from types import SimpleNamespace
 import warnings
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from api.contracts import Request
 from benchmark.calibrate_judge import calibrate, load_pairs, main, parse_score, score_pairs
@@ -80,6 +80,139 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
 
     def pairs(self):
         return load_pairs(self.artifact, self.ratings, self.mapping)
+
+    def test_calibration_judge_defaults_to_mid_including_legacy_config(self):
+        self.assertEqual(self.config.data["judge_calibration"], "mid")
+        self.assertEqual(self.config.judge_calibration, "mid")
+        data = deepcopy(self.config.data)
+        data.pop("judge_calibration")
+        self.assertEqual(Config(data=data).judge_calibration, "mid")
+        self.assertEqual(Config(data=dict(data, judge_calibration="frontier")).judge_calibration, "frontier")
+
+    def test_calibration_judge_config_rejects_unknown_and_non_string_aliases(self):
+        for alias in ("unknown", "", None, True, 1, [], {}):
+            with self.subTest(alias=alias), self.assertRaisesRegex(ValueError, "judge_calibration"):
+                Config(data=dict(self.config.data, judge_calibration=alias))
+
+    async def test_frontier_call_reservation_and_settlement_use_selected_model(self):
+        results, failures = await score_pairs(self.pairs()[:1], self.ledger, self.config,
+            self.provider, "frontier-costs", Admission(), judge_alias="frontier", rubric="v3")
+        self.assertEqual(failures, [])
+        self.assertEqual(self.provider.calls, [self.config.model("frontier")["id"]] * 2)
+        self.assertEqual(self.config.data["judge"], "mid")
+        self.assertEqual(results[0]["judge_alias"], "frontier")
+        self.assertEqual(results[0]["judge_model"], self.config.model("frontier")["id"])
+        for attempt, request in zip(self.ledger.attempts(), self.provider.requests):
+            self.assertEqual(attempt["model"], self.config.model("frontier")["id"])
+            self.assertEqual(Decimal(str(attempt["reserved"])), self.config.reserve_cost("frontier", request))
+            self.assertEqual(Decimal(str(attempt["cost"])), self.config.cost("frontier", 10, 5))
+            self.assertEqual(attempt["purpose"], "evaluation")
+            self.assertEqual(request.max_tokens, 256)
+            self.assertEqual(set(json.loads(request.messages[1]["content"])), {"messages", "answer"})
+
+    async def test_selected_judge_written_to_every_output_row_and_report(self):
+        for alias in ("mid", "frontier"):
+            output = self.root / (alias + ".json")
+            with self.subTest(alias=alias), self.mocked_pipeline(), patch(
+                    "benchmark.calibrate_judge.validate_calibration", return_value=dict(validated=False)):
+                await calibrate(**dict(self.paths, output=output), real=True,
+                                judge_alias=alias, rubric="v3", raw_debug=1)
+            rows = json.loads(output.read_text())
+            report = json.loads(output.with_name(alias + "-report.json").read_text())
+            self.assertEqual(len(rows), 25)
+            for metadata in [report, *rows]:
+                self.assertEqual(metadata["judge_alias"], alias)
+                self.assertEqual(metadata["judge_model"], self.config.model(alias)["id"])
+                self.assertEqual(metadata["rubric"], "v3")
+                self.assertTrue(metadata["rubric_sha256"])
+            self.assertTrue(output.with_name(alias + "-raw-debug.jsonl").exists())
+        self.assertEqual(self.provider.calls.count(self.config.model("frontier")["id"]), 50)
+
+    async def test_configured_judge_default_and_explicit_override(self):
+        config = Config(data=dict(self.config.data, judge_calibration="frontier"))
+        with patch("benchmark.calibrate_judge.Config", return_value=config), patch(
+                "benchmark.calibrate_judge.real_provider") as provider, patch(
+                "benchmark.calibrate_judge.PostgresLedger") as ledger:
+            configured = await calibrate(**self.paths)
+            override = await calibrate(**self.paths, judge_alias="mid")
+        self.assertEqual((configured["judge_alias"], configured["judge_model"]),
+                         ("frontier", config.model("frontier")["id"]))
+        self.assertEqual(override["judge_alias"], "mid")
+        provider.assert_not_called()
+        ledger.assert_not_called()
+        await score_pairs(self.pairs()[:1], self.ledger, config, self.provider,
+                          "configured-judge", Admission())
+        self.assertEqual(self.provider.calls, [config.model("frontier")["id"]] * 2)
+
+    async def test_unknown_judge_alias_rejected_before_provider_or_ledger(self):
+        with patch("benchmark.calibrate_judge.real_provider") as provider, patch(
+                "benchmark.calibrate_judge.PostgresLedger") as ledger:
+            with self.assertRaisesRegex(ValueError, "Unknown calibration judge alias"):
+                await calibrate(**self.paths, real=True, judge_alias="unknown")
+            with self.assertRaisesRegex(ValueError, "Unknown calibration judge alias"):
+                await score_pairs(self.pairs(), self.ledger, self.config, self.provider,
+                                  "invalid-judge", Admission(), judge_alias="unknown")
+        provider.assert_not_called()
+        ledger.assert_not_called()
+        self.assertEqual(self.provider.calls, [])
+        self.assertFalse(self.paths["output"].exists())
+
+    async def test_frontier_keeps_confirmation_guard_and_evaluation_cap(self):
+        with patch.dict("os.environ", ROUTER_CONFIRM_REAL_SPEND="NO"), patch(
+                "benchmark.calibrate_judge.PostgresLedger") as ledger:
+            with self.assertRaisesRegex(ValueError, "ROUTER_CONFIRM_REAL_SPEND"):
+                await calibrate(**self.paths, real=True, judge_alias="frontier")
+        ledger.assert_not_called()
+        capped = SQLiteLedger(evaluation_cap="0")
+        self.addCleanup(capped.close)
+        _, failures = await score_pairs(self.pairs()[:1], capped, self.config,
+            self.provider, "frontier-capped", Admission(), judge_alias="frontier")
+        self.assertEqual(len(failures), 2)
+        self.assertEqual(self.provider.calls, [])
+        self.assertEqual(capped.attempts(), [])
+
+    async def test_live_and_benchmark_judges_stay_mid_with_frontier_calibration(self):
+        config = Config(data=dict(self.config.data, judge_calibration="frontier"))
+        request = Request.parse(dict(messages=[dict(role="user", content="Synthetic prompt")]))
+        for benchmark in (False, True):
+            parent, attempt = f"ordinary-parent-{benchmark}", f"ordinary-judge-{benchmark}"
+            self.ledger.begin(parent, "ordinary-judge")
+            self.ledger.job(attempt, parent)
+            quality = Quality(self.ledger, config, self.provider, benchmark=benchmark)
+            await quality.process((attempt, parent, "simple", request, Output("Answer", 0, 0)))
+            self.assertEqual(self.provider.requests[-1].max_tokens, 32)
+            self.assertEqual(quality.timeout, 5)
+        self.assertEqual(self.provider.calls, [config.model("mid")["id"]] * 2)
+        for attempt, request in zip(self.ledger.attempts(), self.provider.requests):
+            self.assertEqual(attempt["model"], config.model("mid")["id"])
+            self.assertEqual(Decimal(str(attempt["reserved"])), config.reserve_cost("mid", request))
+
+    async def test_frontier_uses_fresh_attempts_and_reuses_only_its_own_completed_jobs(self):
+        for alias in ("mid", "frontier", "frontier"):
+            await score_pairs(self.pairs()[:1], self.ledger, self.config, self.provider,
+                              "same-source", Admission(), judge_alias=alias, rubric="v3")
+        self.assertEqual(len(self.ledger.attempts()), 4)
+        self.assertEqual(self.provider.calls, [self.config.model("mid")["id"]] * 2
+                         + [self.config.model("frontier")["id"]] * 2)
+
+    async def test_unresolved_rerun_rejects_changed_judge_alias_or_model(self):
+        with self.mocked_pipeline(RecordingJudge('{}')):
+            await calibrate(**self.paths, real=True, rubric="v3", judge_alias="frontier")
+        paths = dict(self.paths, output=self.root / "rerun.json", rerun_unresolved=self.paths["output"])
+        with patch("benchmark.calibrate_judge.real_provider") as provider:
+            with self.assertRaisesRegex(ValueError, "judge alias/model mismatch"):
+                await calibrate(**paths, rubric="v3", judge_alias="mid")
+            for filename in ("pairs.json", "pairs-report.json"):
+                path = self.root / filename
+                original = path.read_text()
+                path.write_text(original.replace('openai/gpt-4o', 'different-model'))
+                with self.assertRaisesRegex(ValueError, "judge alias/model mismatch"):
+                    await calibrate(**paths, rubric="v3", judge_alias="frontier")
+                path.write_text(original)
+            plan = await calibrate(**paths, rubric="v3", judge_alias="frontier")
+        self.assertEqual(plan["planned_calls"], 50)
+        provider.assert_not_called()
+        self.assertFalse(paths["output"].exists())
 
     def test_calibration_timeout_defaults_to_30(self):
         self.assertEqual(self.config.judge_calibration_timeout_s, 30)
@@ -583,6 +716,20 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class CalibrationCLITests(unittest.TestCase):
+    def test_cli_frontier_selection_and_unknown_alias_rejection(self):
+        with patch("benchmark.calibrate_judge.calibrate", new_callable=AsyncMock,
+                   return_value=dict(dry_run=True, judge_alias="frontier", judge_model="openai/gpt-4o")) as run, patch(
+                   "sys.stdout", new_callable=io.StringIO) as stdout:
+            self.assertEqual(main(["--rubric", "v3", "--judge-alias", "frontier"]), 0)
+            self.assertEqual(run.call_args.kwargs["judge_alias"], "frontier")
+            self.assertFalse(run.call_args.kwargs["real"])
+            self.assertEqual(json.loads(stdout.getvalue())["judge_model"], "openai/gpt-4o")
+            run.reset_mock()
+            with patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit) as error:
+                main(["--judge-alias", "unknown"])
+            self.assertEqual(error.exception.code, 2)
+            run.assert_not_called()
+
     def test_cli_dry_run_and_failed_validation_exit_codes(self):
         for real, result, expected in ((False, dict(dry_run=True, pairs=25, planned_calls=50), 0),
                                        (True, dict(validated=False, unknown_outputs=[dict(blind_id="pair")]), 1)):
