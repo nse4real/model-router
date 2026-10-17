@@ -5,6 +5,8 @@
   "counts": {
     "savings": 60
   },
+  "human_subset": [],
+  "reproducibility_subset": [],
   "licence": "MIT",
-  "notes": "Assistant-authored savings split, disjoint from dataset v1. Not human-rated."
+  "notes": "Assistant-authored savings split, disjoint from dataset v1. Not human-rated; no human or repeat subset."
 }

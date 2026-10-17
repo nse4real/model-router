@@ -33,8 +33,11 @@ def load_dataset(directory=DATA):
     return rows, manifest
 
 
-def split(name, directory=DATA):
+def split(name, directory=None):
     if name not in KNOWN_SPLITS:
         raise ValueError("Unknown split")
+    if directory is None:
+        # The savings split lives in its own frozen dataset version (v2).
+        directory = DATA / "savings-v2" if name == "savings" else DATA
     rows, manifest = load_dataset(directory)
     return [r for r in rows if r["split"] == name], manifest

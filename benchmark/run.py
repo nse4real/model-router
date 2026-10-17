@@ -136,6 +136,9 @@ async def run_conditions(router, prompts, seed=13, run_id=None, on_record=None, 
 
 
 async def main(args):
+    if args.storage is None:
+        # Real runs must use shared Postgres spend admission; mock runs stay out of the shared ledger.
+        args.storage = "postgres" if args.real else "test-double"
     output = Path(args.output)
     if output.exists():
         raise SystemExit("Refusing to overwrite an existing run; use a new output or benchmark.recover")
@@ -227,7 +230,7 @@ async def main(args):
 
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--split", choices=["dev","calibration","held-out"], default="dev")
+    parser.add_argument("--split", choices=["dev","calibration","held-out","savings"], default="dev")
     parser.add_argument("--allow-held-out-mock", action="store_true")
     parser.add_argument("--allow-held-out", action="store_true")
     parser.add_argument("--real", action="store_true")
@@ -235,7 +238,8 @@ def build_parser():
     parser.add_argument("--dev-results")
     parser.add_argument("--second-run", action="store_true")
     parser.add_argument("--prompt-ids-file", help="JSON list of calibration prompt IDs to rerun")
-    parser.add_argument("--storage", choices=["postgres","test-double"], default="postgres")
+    parser.add_argument("--storage", choices=["postgres","test-double"], default=None,
+                        help="Defaults to postgres with --real, otherwise test-double")
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--output", default="results/benchmark-mock-dev.json")
     return parser
