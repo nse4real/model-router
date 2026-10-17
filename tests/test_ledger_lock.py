@@ -1,6 +1,7 @@
 ﻿"""Spend-lock budgets and private driver diagnostics, without external services."""
 from contextlib import contextmanager
 from types import SimpleNamespace
+import queue
 import unittest
 
 from api.contracts import Request, RouterError
@@ -21,12 +22,18 @@ class Connection:
         self.wait_ms = wait_ms
         self.failure = failure
 
-    def __enter__(self):
-        return self
+    closed = False
+    info = SimpleNamespace(transaction_status=0)  # idle; ledger returns it to the pool
 
-    def __exit__(self, *args):
-        if args[0] is None and self.failure == "commit":
+    def commit(self):
+        if self.failure == "commit":
             raise DriverError("private DSN password and prompt text")
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        self.closed = True
 
     @contextmanager
     def transaction(self):
@@ -52,6 +59,7 @@ class Connection:
 def fake_ledger(conn, lock_timeout_ms=2000, initialized=True):
     ledger = PostgresLedger.__new__(PostgresLedger)
     Ledger.__init__(ledger)
+    ledger._idle = queue.LifoQueue(maxsize=32)
     ledger.lock_timeout_ms = lock_timeout_ms
     ledger.dsn, ledger.dict_row, ledger.initialized = "private DSN", None, initialized
     ledger.psycopg = SimpleNamespace(connect=lambda *a, **kw: conn, Error=DriverError)

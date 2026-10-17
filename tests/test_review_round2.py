@@ -362,10 +362,14 @@ class ReviewPostgresContractTests(unittest.TestCase):
         class Connection:
             repeatable = False
             visible = None
-            def __enter__(self):
-                return self
-            def __exit__(self, *args):
+            closed = False
+            info = SimpleNamespace(transaction_status=0)  # idle; ledger returns it to the pool
+            def commit(self):
                 pass
+            def rollback(self):
+                pass
+            def close(self):
+                self.closed = True
             def execute(self, sql, params=()):
                 commands.append((sql, params))
                 if sql == 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ':
@@ -381,8 +385,10 @@ class ReviewPostgresContractTests(unittest.TestCase):
                     rows = [{'cost': 1, 'purpose': 'inference', 'state': 'reserved'}] if visible else []
                     return SimpleNamespace(fetchall=lambda: rows)
                 return SimpleNamespace(fetchall=lambda: [])
+        import queue
         ledger = PostgresLedger.__new__(PostgresLedger)
         Ledger.__init__(ledger)
+        ledger._idle = queue.LifoQueue(maxsize=32)
         ledger.dsn, ledger.dict_row, ledger.initialized = 'local-stub', None, True
         ledger.psycopg = SimpleNamespace(connect=lambda *a, **kw: Connection(),
                                            Error=type('StubDatabaseError', (Exception,), {}))

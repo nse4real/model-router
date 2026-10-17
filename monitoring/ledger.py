@@ -6,6 +6,7 @@ from pathlib import Path
 import json
 import logging
 import os
+import queue
 import random
 import sqlite3
 import threading
@@ -393,6 +394,7 @@ class PostgresLedger(Ledger):
         self.dsn = dsn
         self.lock_timeout_ms = lock_timeout_ms
         self.initialized = False
+        self._idle = queue.LifoQueue(maxsize=32)
 
     def _initialize(self, conn):
         if self.initialized:
@@ -426,28 +428,53 @@ class PostgresLedger(Ledger):
             db.execute("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS latency_ms NUMERIC")
         self.initialized = True
 
+    def _checkout(self):
+        # Idle connections are reused across transactions and threads. Each
+        # transaction still commits or rolls back on its own, so no lock or
+        # session setting carries from one transaction into the next.
+        try:
+            conn = self._idle.get_nowait()
+        except queue.Empty:
+            conn = self.psycopg.connect(self.dsn, row_factory=self.dict_row, connect_timeout=2)
+        if conn.closed:
+            conn = self.psycopg.connect(self.dsn, row_factory=self.dict_row, connect_timeout=2)
+        return conn
+
+    def _checkin(self, conn, healthy):
+        if not healthy or conn.closed:
+            conn.close()
+            return
+        try:
+            self._idle.put_nowait(conn)
+        except queue.Full:
+            conn.close()
+
     @contextmanager
     def transaction(self, lock=False, snapshot=False):
         if not self.available:
             raise StorageUnavailable("Spend storage unavailable")
+        conn = None
+        healthy = False
         try:
-            with self.psycopg.connect(self.dsn, row_factory=self.dict_row, connect_timeout=2) as conn:
-                self._initialize(conn)
-                db = _PostgresSession(conn)
-                if snapshot:
-                    db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-                if lock:
-                    db.execute("SELECT set_config('lock_timeout', ?, true)",
-                               (str(self.lock_timeout_ms) + "ms",))
-                    # Only lock_timeout bounds this wait. A shorter statement
-                    # timeout (including a DSN default) would defeat that budget.
-                    db.execute("SELECT set_config('statement_timeout', ?, true)", ("0",))
-                    db.execute("SELECT id FROM spend_lock WHERE id=1 FOR UPDATE")
-                # Ordinary statements do not inherit the request deadline.
-                timeout = str(self.transaction_timeout()) + "ms"
-                db.execute("SELECT set_config('lock_timeout', ?, true)", (timeout,))
-                db.execute("SELECT set_config('statement_timeout', ?, true)", (timeout,))
-                yield db
+            conn = self._checkout()
+            self._initialize(conn)
+            db = _PostgresSession(conn)
+            if snapshot:
+                db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            if lock:
+                db.execute("SELECT set_config('lock_timeout', ?, true)",
+                           (str(self.lock_timeout_ms) + "ms",))
+                # Only lock_timeout bounds this wait. A shorter statement
+                # timeout (including a DSN default) would defeat that budget.
+                db.execute("SELECT set_config('statement_timeout', ?, true)", ("0",))
+                db.execute("SELECT id FROM spend_lock WHERE id=1 FOR UPDATE")
+            # Ordinary statements do not inherit the request deadline.
+            timeout = str(self.transaction_timeout()) + "ms"
+            db.execute("SELECT set_config('lock_timeout', ?, true)", (timeout,))
+            db.execute("SELECT set_config('statement_timeout', ?, true)", (timeout,))
+            yield db
+            conn.commit()
+            healthy = True
         except self.psycopg.Error as exc:
             # Driver messages/tracebacks can contain SQL values or connection
             # details. Attach the cause for diagnostics without formatting it.
@@ -457,3 +484,13 @@ class PostgresLedger(Ledger):
             error = (TransientContention if exc.sqlstate in {"57014", "55P03", "40001", "40P01"}
                      else StorageUnavailable)
             raise error("Spend storage unavailable") from None
+        finally:
+            if conn is not None:
+                if not healthy:
+                    # An uncommitted transaction must never return to the pool.
+                    try:
+                        conn.rollback()
+                        healthy = not conn.closed
+                    except Exception:
+                        healthy = False
+                self._checkin(conn, healthy)

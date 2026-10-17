@@ -200,7 +200,7 @@ are skipped here: HTTP transport, Postgres and Redis.
 | 5.10 C quality withheld without validated judge | Covered offline | human-source and diagnostic mock-judge fixtures |
 | 5.10 reproducibility fixed subset / paired CIs | Covered algorithmically | reproducibility_fixed_subset and paired_savings_interval; no second held-out run |
 | 5.10 git/dataset/model/price/seed/time/reduction metadata | Covered on dev mock | result writer and successful dev artifact; checkpoint/recovery fixtures |
-| 5.10 fixed mock load, error <1%, local P95 threshold | Partial | local in-process diagnostic ran; HTTP load unavailable without FastAPI |
+| 5.10 fixed mock load, error <1%, local P95 threshold | Partial; HTTP threshold passed after pooling | In-process p95 0.5 ms passes. HTTP on the Docker stack (mock provider, N=100, C=10), after the connection pool: 0 errors, p95 48.3, 42.4 and 43.1 ms against a 50 ms threshold (three runs, cache flushed each time). Before pooling: p95 1,902 ms, FAILED. Cause before pooling: each routed request opened 9 new Postgres connections (about 270 to 330 ms per request even at concurrency 1). Threshold unchanged. |
 | 6 compose stack starts and dashboard screenshot | Not verified | Docker daemon unavailable; compose/provisioning supplied |
 | 6 human validation, real benchmark results/CIs | Not met by design | Human input and separately authorised benchmark still pending |
 | 9 secrets/log/artifact redaction | Covered on fixtures | recursive redaction, JSON error strings, provider-error logs and artifact scans; no provider keys required |

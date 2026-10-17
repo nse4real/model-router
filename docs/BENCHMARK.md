@@ -17,7 +17,10 @@ from all human-subset analysis, including cost and completion. This departs from
 PLAN.md section 5.7, which scores non-completed outputs as 1. The 60-pair gate in
 `benchmark/results.py` is unchanged, so the B quality claim stays withheld. The
 54-pair result is reported descriptively only: one blinded rater, mean rating A 4.32,
-B 4.52, mean difference +0.20, with no significance test or interval yet. Scores
+B 4.52, mean difference +0.20 (95% bootstrap interval 0.00 to +0.41, 10,000 resamples,
+seed 13; two-sided sign test on 15 non-tied pairs, B higher on 11, p = 0.12). The
+interval touches zero and the test is not significant at 0.05, so the data do not show
+a clear quality difference. Scores
 cluster at 5 (78 of 108), so a ceiling effect is possible.
 
 V1, v2 and v3 on mid returned constant 5s; v3 on frontier (`gpt-4o`) had
