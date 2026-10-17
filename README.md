@@ -215,7 +215,7 @@ records that. The held-out human subset has been rated by one blinded rater: 54 
 pairs, not the predeclared 60. Six prompts with an incomplete A or B output are excluded
 from all human analysis. The B quality claim stays withheld by the 60-pair gate. The
 54-pair result is descriptive only: mean rating A 4.32, B 4.52, difference +0.20, with no
-significance test or interval yet. See docs/BENCHMARK.md for the full deviation.
+95% bootstrap interval 0.00 to +0.41 and a two-sided sign test p = 0.12 (B higher on 11 of 15 non-tied pairs). The interval touches zero, so no clear quality difference is shown. See docs/BENCHMARK.md for the full deviation.
 The human-subset analyzer is benchmark/evaluate.py.
 See [benchmark workflow](docs/BENCHMARK.md) for formats and safeguards.
 
@@ -253,7 +253,7 @@ The LiteLLM path was tested only with an in-memory stub and remains labelled
 | Cost ledger | Postgres reservation/settlement/recovery implemented; SQLite contract double tested/reconciled; real Postgres unverified |
 | Grafana dashboard | JSON, provisioning and formulas supplied; fixture values tested; rendering/screenshots unavailable |
 | Ollama | Optional configurable LiteLLM path exists, unverified and uncalled |
-| Benchmark and load test | Dev mock run, local in-process load diagnostic, and one real held-out benchmark run (240 of 240 records, USD 0.2115) ran; HTTP load test not run |
+| Benchmark and load test | Dev mock run, local in-process load diagnostic (p95 0.5 ms, passes), and one real held-out benchmark run (240 of 240 records, USD 0.2115) ran. HTTP load test on the Docker stack, mock provider (N=100, C=10): 0 errors and p95 local overhead of 42 to 48 ms across three runs, against a 50 ms threshold. Before the connection pool, p95 was 1,902 ms; the cause was a new Postgres connection for each of 9 ledger operations per request. The margin to the threshold is small. |
 | Docker | Compose/Dockerfile supplied; startup unverified: daemon/compose unavailable |
 
 [Acceptance coverage](docs/TEST_MATRIX.md) distinguishes offline, partial and unmet
