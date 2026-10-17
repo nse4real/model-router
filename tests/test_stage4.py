@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from benchmark.dataset import load_dataset, split
 from benchmark.load_test import execute, http_json
 from benchmark.preflight import estimate
@@ -82,7 +83,10 @@ class BenchmarkAndMetricsTests(unittest.IsolatedAsyncioTestCase):
         prompts, _ = split("dev")
         ledger = SQLiteLedger()
         router = Router(ledger)
-        run_id, records = await run_conditions(router, prompts[:2])
+        with patch.object(router, "route", wraps=router.route) as route:
+            run_id, records = await run_conditions(router, prompts[:2])
+        self.assertEqual(route.await_count, 8)
+        self.assertTrue(all(call.args[0].temperature == 1 for call in route.await_args_list))
         self.assertEqual(len(records),8)
         report = analyse(records,2,resamples=100)
         self.assertIsNone(report["conditions"]["A"]["accepted"])
@@ -105,6 +109,7 @@ class BenchmarkAndMetricsTests(unittest.IsolatedAsyncioTestCase):
         p = MockProvider({cfg.model("cheap")["id"]: [ProviderError(400)]})
         router = Router(ledger,provider=p)
         await router.route(req("fallback fixture"))
+        await router.drain_background()
         await router.route(req("fallback fixture"))  # cache hit after a failed primary
         ledger.begin("unknown")
         ledger.reserve("u","unknown","m","mock","inference","v1",Decimal(".01"))
@@ -123,7 +128,12 @@ class BenchmarkAndMetricsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["cache_hits"],1)
         self.assertEqual(data["retries"],1)
         self.assertEqual(data["attempts"],4)
-        self.assertEqual(data["unknown"],2)
+        self.assertEqual(data["unknown"],1)
+        primary = next(attempt for attempt in ledger.attempts()
+                       if attempt["model"] == cfg.model("cheap")["id"])
+        self.assertEqual(json.loads(primary["error"])["status"],400)
+        self.assertEqual(primary["cost_status"],"rejected")
+        self.assertEqual(Decimal(str(primary["cost"])),0)
         self.assertEqual(data["evaluation_attempts"],1)
         self.assertEqual(data["evaluation_cost"],.005)
         total = Decimal(totals(ledger)["total_cost"])

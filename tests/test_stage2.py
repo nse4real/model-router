@@ -94,7 +94,7 @@ class CacheTests(unittest.TestCase):
         self.assertNotEqual(k, key(base, "m2", "p1"))
         self.assertNotEqual(k, key(base, "m", "p2"))
         self.assertNotEqual(k, key(req(base.messages[0]["content"], max_tokens=3), "m", "p1"))
-        self.assertNotEqual(k, key(req(base.messages[0]["content"], temperature=1), "m", "p1"))
+        self.assertNotEqual(k, key(req(base.messages[0]["content"], temperature=0), "m", "p1"))
 
     def test_rate_fail_open(self):
         class Down:
@@ -121,6 +121,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_success_cache_and_ledger(self):
         a = await self.router.route(req())
+        await self.router.drain_background()
         b = await self.router.route(req())
         self.assertFalse(a["cache_hit"])
         self.assertTrue(b["cache_hit"])
@@ -135,6 +136,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.provider.calls, [])
         self.ledger.available = True
         await self.router.route(req())
+        await self.router.drain_background()
         self.ledger.available = False
         self.assertTrue((await self.router.route(req()))["cache_hit"])
 
@@ -169,7 +171,9 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_deadline(self):
         self.provider.actions = {m["id"]: [.1] * 2 for m in self.config.models.values()}
-        await self.status(504, deadline_ms=2)
+        with self.assertRaises(RouterError) as caught:
+            await self.router.route(req(deadline_ms=20), use_cache=False)
+        self.assertEqual(caught.exception.status, 504)
         self.assertEqual(len(self.provider.calls), 1)
         self.assertEqual(self.ledger.attempts()[0]["state"], "dispatched")
 
@@ -177,10 +181,15 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         def fail(*args, **kw):
             raise StorageUnavailable()
         self.ledger.settle = fail
-        with self.assertLogs("router", level="ERROR") as logs:
-            await self.status(503)
-        self.assertIn("attempt_id", str(logs.output))
-        self.assertEqual(self.ledger.attempts()[0]["state"], "dispatched")
+        with tempfile.TemporaryDirectory() as directory:
+            from monitoring.settlement import SettlementJournal
+            self.router.settlement_journal = SettlementJournal(directory + "/responses.sqlite")
+            with self.assertLogs("router", level="ERROR") as logs:
+                response = await self.router.route(req(), use_cache=False)
+            self.assertEqual(response["settlement_status"], "unknown")
+            self.assertTrue(response["content"])
+            self.assertIn("attempt_id", str(logs.output))
+            self.assertEqual(self.ledger.attempts()[0]["state"], "unknown")
 
     async def test_no_eligible_fallback(self):
         self.router.rate.allow = lambda *a: False

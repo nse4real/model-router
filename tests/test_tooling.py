@@ -35,15 +35,17 @@ class ToolingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_blinded_calibration_export_without_dispatch(self):
         prompts, _ = split("calibration")
-        fixture = {"records":[dict(prompt_id=r["id"],condition=c,content="synthetic fixture")
+        fixture = {"records":[dict(prompt_id=r["id"],condition=c,content="synthetic fixture",
+                                   completed=True,status=200)
                               for r in prompts for c in ("A","B")]}
         with tempfile.TemporaryDirectory() as tmp:
-            result = export_ratings(fixture,tmp,mode="calibration")
+            output = Path(tmp,"ratings")
+            result = export_ratings(fixture,output,mode="calibration")
             self.assertEqual(result["individual_ratings"],50)
-            blinded = json.loads(Path(tmp,"ratings-blinded.json").read_text())
+            blinded = json.loads((output/"ratings-blinded.json").read_text())
             self.assertEqual(len(blinded),25)
             self.assertTrue(all("left_condition" not in r for r in blinded))
-            mapping = json.loads(Path(tmp,"mapping-private.json").read_text())
+            mapping = json.loads((output/"mapping-private.json").read_text())
             self.assertEqual(len({r["prompt_id"] for r in mapping}),25)
             self.assertTrue({r["tier"] for r in mapping} >= {"simple","medium","complex"})
             self.assertTrue({r["task_type"] for r in mapping} >= {"general","reasoning","code","maths"})

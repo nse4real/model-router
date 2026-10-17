@@ -23,7 +23,7 @@ class RegressionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_price_error_status(self):
         cfg = Config()
-        del cfg.models["cheap"]["input_per_million"]
+        del cfg.models["cheap"]["tiers"][0]["input_per_million"]
         router = Router(SQLiteLedger(),config=cfg)
         request = req()
         with self.assertRaises(RouterError) as exc:
@@ -101,10 +101,13 @@ class RegressionTests(unittest.IsolatedAsyncioTestCase):
         class SlowFail(MockProvider):
             async def complete(self, model, request, timeout):
                 self.calls.append(model["id"])
-                clock.now += .004
+                # Advance only the injected clock. Keep real asyncio timeouts
+                # above Windows' timer resolution and cache thread startup.
+                clock.now += .6
                 raise ProviderError(500)
         provider = SlowFail()
         with self.assertRaises(RouterError) as exc:
-            await Router(SQLiteLedger(),provider=provider,clock=clock).route(req(deadline_ms=5))
+            await Router(SQLiteLedger(),provider=provider,clock=clock).route(req(deadline_ms=1000))
         self.assertEqual(exc.exception.status,504)
         self.assertEqual(len(provider.calls),2)
+        self.assertAlmostEqual(clock.now, 1.2)

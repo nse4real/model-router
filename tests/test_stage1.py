@@ -10,6 +10,8 @@ class ContractTests(unittest.TestCase):
     def test_defaults(self):
         r = Request.parse({"messages": [{"role": "user", "content": "hello"}]})
         self.assertEqual((r.max_tokens, r.deadline_ms), (512, 10000))
+        self.assertEqual(r.temperature, 1)
+        self.assertEqual(Request(messages=r.messages).temperature, 1)
         self.assertTrue(r.request_id)
 
     def test_invalid(self):
@@ -23,9 +25,17 @@ class ContractTests(unittest.TestCase):
     def test_limits(self):
         for name, value in (("max_tokens", 2049), ("max_tokens", True),
                             ("deadline_ms", 60001), ("max_cost_usd", -1),
-                            ("max_cost_usd", "NaN"), ("temperature", float("nan"))):
+                            ("max_cost_usd", "NaN"), ("temperature", float("nan")),
+                            ("temperature", -0.1), ("temperature", 2.1)):
             with self.subTest(name=name, value=value), self.assertRaises(RouterError):
                 Request.parse({"messages": [{"role": "user", "content": "x"}], name: value})
+
+    def test_temperature_range_endpoints(self):
+        for temperature in (0, 2):
+            with self.subTest(temperature=temperature):
+                r = Request.parse({"messages": [{"role": "user", "content": "x"}],
+                                   "temperature": temperature})
+                self.assertEqual(r.temperature, temperature)
 
 
 class ClassifierTests(unittest.TestCase):
@@ -44,7 +54,7 @@ class ClassifierTests(unittest.TestCase):
 
     def test_boundaries(self):
         for text, tier in (("hello", "simple"), ("code", "medium"),
-                           ("reason code prove filler", "medium"),
+                           ("reason code compare filler", "medium"),
                            ("code reason ```", "complex")):
             self.assertEqual(score(self.request(text))[0], tier)
         for length, tier in ((499, "simple"), (500, "medium"), (999, "medium"),
