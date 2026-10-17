@@ -167,14 +167,23 @@ class QualityAndPolicyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_renewal_failure_abandons(self):
         clock = Clock()
-        store = MemoryHealthStore(clock)
+        renewed = asyncio.Event()
+        class RenewalStore(MemoryHealthStore):
+            def renew(self, model, token):
+                result = super().renew(model, token)
+                renewed.set()
+                return result
+        store = RenewalStore(clock)
         health = Health(store, slo_ms=100, renewal_seconds=.001)
         for _ in range(20):
             health.observe("m", health.acquire("m"), True, 101)
         clock.now = 61
         permit = health.acquire("m")
         store.renew_ok = False
-        await health.run_probe("m", permit, asyncio.sleep(.005))
+        # Completion follows a renewal attempt, not a race between 1 ms/5 ms
+        # timers which can become ready together on coarse Windows clocks.
+        await asyncio.wait_for(health.run_probe("m", permit, renewed.wait()), timeout=1)
+        self.assertTrue(renewed.is_set())
         self.assertFalse(permit.valid)
         self.assertFalse(health.observe("m", permit, True, 1))
         self.assertTrue(store.states["m"]["opened"])
